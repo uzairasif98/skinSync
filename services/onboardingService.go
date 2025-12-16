@@ -10,37 +10,33 @@ import (
 	"skinSync/models"
 )
 
-type OnboardingMasters struct {
-	SkinTypes  []models.SkinTypeQuestion      `json:"skin_types"`
-	Concerns   []models.ConcernQuestion       `json:"concerns"`
-	Lifestyles []models.LifeStyleQuestion     `json:"lifestyles"`
-	Questions  []models.SkinConditionQuestion `json:"questions"` // preloaded with Options
-	Goals      []models.SkinGoalQuestion      `json:"goals"`
-}
-
-func GetOnboardingMasters() (*OnboardingMasters, error) {
+func GetOnboardingMasters() (*resdto.OnboardingMastersResponse, error) {
 	db := config.DB
 	if db == nil {
 		return nil, errors.New("db not initialized")
 	}
-	var masters OnboardingMasters
-	if err := db.Preload("Options").Find(&masters.SkinTypes).Error; err != nil {
+
+	var resp resdto.OnboardingMastersResponse
+	resp.IsSuccess = true
+	resp.Message = "Onboarding masters retrieved successfully"
+
+	if err := db.Preload("Options").Find(&resp.Data.SkinTypes).Error; err != nil {
 		return nil, err
 	}
-	if err := db.Preload("Options").Find(&masters.Concerns).Error; err != nil {
+	if err := db.Preload("Options").Find(&resp.Data.Concerns).Error; err != nil {
 		return nil, err
 	}
-	if err := db.Preload("Options").Find(&masters.Lifestyles).Error; err != nil {
+	if err := db.Preload("Options").Find(&resp.Data.Lifestyles).Error; err != nil {
 		return nil, err
 	}
 	// preload options for questions
-	if err := db.Preload("Options").Preload("Options").Find(&masters.Questions).Error; err != nil {
+	if err := db.Preload("Options").Find(&resp.Data.Questions).Error; err != nil {
 		return nil, err
 	}
-	if err := db.Preload("Options").Find(&masters.Goals).Error; err != nil {
+	if err := db.Preload("Options").Find(&resp.Data.Goals).Error; err != nil {
 		return nil, err
 	}
-	return &masters, nil
+	return &resp, nil
 }
 
 // SaveOnboardingAnswer saves user's answers for a specific onboarding step.
@@ -118,14 +114,17 @@ func GetUserOnboarding(userID uint64) (*resdto.UserOnboardingResponse, error) {
 	if db == nil {
 		return nil, errors.New("db not initialized")
 	}
+
 	var resp resdto.UserOnboardingResponse
+	resp.IsSuccess = true
+	resp.Message = "User onboarding data retrieved successfully"
 
 	var sTypes []models.SkinType
 	if err := db.Where("user_id = ?", userID).Find(&sTypes).Error; err != nil {
 		return nil, err
 	}
 	for _, s := range sTypes {
-		resp.SkinTypes = append(resp.SkinTypes, resdto.SkinTypeAnswer{QuestionID: s.QuestionID, TypeID: s.TypeID})
+		resp.Data.SkinTypes = append(resp.Data.SkinTypes, resdto.SkinTypeAnswer{QuestionID: s.QuestionID, TypeID: s.TypeID})
 	}
 
 	var concerns []models.SkinConcern
@@ -133,7 +132,7 @@ func GetUserOnboarding(userID uint64) (*resdto.UserOnboardingResponse, error) {
 		return nil, err
 	}
 	for _, c := range concerns {
-		resp.Concerns = append(resp.Concerns, resdto.ConcernAnswer{QuestionID: c.QuestionID, ConcernID: c.ConcernID})
+		resp.Data.Concerns = append(resp.Data.Concerns, resdto.ConcernAnswer{QuestionID: c.QuestionID, ConcernID: c.ConcernID})
 	}
 
 	var lifestyles []models.LifeStyleDescription
@@ -141,7 +140,7 @@ func GetUserOnboarding(userID uint64) (*resdto.UserOnboardingResponse, error) {
 		return nil, err
 	}
 	for _, l := range lifestyles {
-		resp.Lifestyles = append(resp.Lifestyles, resdto.LifeStyleAnswer{QuestionID: l.QuestionID, DescriptionID: l.DescriptionID})
+		resp.Data.Lifestyles = append(resp.Data.Lifestyles, resdto.LifeStyleAnswer{QuestionID: l.QuestionID, DescriptionID: l.DescriptionID})
 	}
 
 	var qas []models.SkinConditionQuestionAnswer
@@ -149,7 +148,7 @@ func GetUserOnboarding(userID uint64) (*resdto.UserOnboardingResponse, error) {
 		return nil, err
 	}
 	for _, q := range qas {
-		resp.Questions = append(resp.Questions, resdto.QuestionAnswer{QuestionID: q.QuestionID, OptionID: q.OptionID})
+		resp.Data.Questions = append(resp.Data.Questions, resdto.QuestionAnswer{QuestionID: q.QuestionID, OptionID: q.OptionID})
 	}
 
 	var goals []models.UserSkinGoal
@@ -157,24 +156,24 @@ func GetUserOnboarding(userID uint64) (*resdto.UserOnboardingResponse, error) {
 		return nil, err
 	}
 	for _, g := range goals {
-		resp.Goals = append(resp.Goals, resdto.GoalAnswer{QuestionID: g.QuestionID, GoalID: g.GoalID})
+		resp.Data.Goals = append(resp.Data.Goals, resdto.GoalAnswer{QuestionID: g.QuestionID, GoalID: g.GoalID})
 	}
 
 	// mark completed steps (simple heuristic)
-	if len(resp.SkinTypes) > 0 {
-		resp.CompletedSteps = append(resp.CompletedSteps, "skin_type")
+	if len(resp.Data.SkinTypes) > 0 {
+		resp.Data.CompletedSteps = append(resp.Data.CompletedSteps, "skin_type")
 	}
-	if len(resp.Concerns) > 0 {
-		resp.CompletedSteps = append(resp.CompletedSteps, "concerns")
+	if len(resp.Data.Concerns) > 0 {
+		resp.Data.CompletedSteps = append(resp.Data.CompletedSteps, "concerns")
 	}
-	if len(resp.Lifestyles) > 0 {
-		resp.CompletedSteps = append(resp.CompletedSteps, "lifestyles")
+	if len(resp.Data.Lifestyles) > 0 {
+		resp.Data.CompletedSteps = append(resp.Data.CompletedSteps, "lifestyles")
 	}
-	if len(resp.Questions) > 0 {
-		resp.CompletedSteps = append(resp.CompletedSteps, "questions")
+	if len(resp.Data.Questions) > 0 {
+		resp.Data.CompletedSteps = append(resp.Data.CompletedSteps, "questions")
 	}
-	if len(resp.Goals) > 0 {
-		resp.CompletedSteps = append(resp.CompletedSteps, "goals")
+	if len(resp.Data.Goals) > 0 {
+		resp.Data.CompletedSteps = append(resp.Data.CompletedSteps, "goals")
 	}
 
 	return &resp, nil

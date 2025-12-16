@@ -14,7 +14,7 @@ import (
 func GetOnboardingMastersHandler(c echo.Context) error {
 	m, err := services.GetOnboardingMasters()
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return c.JSON(http.StatusInternalServerError, resdto.BaseResponse{IsSuccess: false, Message: err.Error()})
 	}
 	return c.JSON(http.StatusOK, m)
 }
