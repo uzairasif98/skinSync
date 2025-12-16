@@ -14,10 +14,11 @@ type SkinTypeOption struct {
 }
 
 type SkinType struct {
-	ID         uint64 `gorm:"primaryKey;autoIncrement"`
-	UserID     uint64 `gorm:"index;not null"`
-	QuestionID uint64 `gorm:"index;not null"`
-	TypeID     uint64 `gorm:"index;not null"`
+	ID         uint64           `gorm:"primaryKey;autoIncrement"`
+	UserID     uint64           `gorm:"index;not null"`
+	QuestionID uint64           `gorm:"index;not null"`
+	TypeID     uint64           `gorm:"index;not null"`
+	Question   SkinTypeQuestion `gorm:"foreignKey:QuestionID;references:ID;constraint:OnDelete:CASCADE"`
 }
 
 //Step 2
@@ -37,6 +38,8 @@ type SkinConcern struct {
 	UserID     uint64 `gorm:"index;not null"`
 	QuestionID uint64 `gorm:"index;not null"`
 	ConcernID  uint64 `gorm:"index;not null"`
+
+	Question ConcernQuestion `gorm:"foreignKey:QuestionID;references:ID;constraint:OnDelete:CASCADE"`
 }
 
 // Step 3
@@ -52,10 +55,11 @@ type LifeStyleDescriptionOption struct {
 }
 
 type LifeStyleDescription struct {
-	ID            uint64 `gorm:"primaryKey;autoIncrement"`
-	UserID        uint64 `gorm:"index;not null"`
-	QuestionID    uint64 `gorm:"index;not null"`
-	DescriptionID uint64 `gorm:"index;not null"`
+	ID            uint64            `gorm:"primaryKey;autoIncrement"`
+	UserID        uint64            `gorm:"index;not null"`
+	QuestionID    uint64            `gorm:"index;not null"`
+	DescriptionID uint64            `gorm:"index;not null"`
+	Question      LifeStyleQuestion `gorm:"foreignKey:QuestionID;references:ID;constraint:OnDelete:CASCADE"`
 }
 
 // Questions & options (step 4)
@@ -77,6 +81,8 @@ type SkinConditionQuestionAnswer struct {
 	UserID     uint64 `gorm:"index;not null"`
 	QuestionID uint64 `gorm:"index;not null"`
 	OptionID   uint64 `gorm:"index;not null"`
+
+	Question SkinConditionQuestion `gorm:"foreignKey:QuestionID;references:ID;constraint:OnDelete:CASCADE"`
 }
 
 // Goals (step 5)
@@ -93,8 +99,9 @@ type SkinGoal struct {
 }
 
 type UserSkinGoal struct {
-	ID         uint64 `gorm:"primaryKey;autoIncrement"`
-	UserID     uint64 `gorm:"index;not null"`
-	QuestionID uint64 `gorm:"index;not null"`
-	GoalID     uint64 `gorm:"index;not null"`
+	ID         uint64           `gorm:"primaryKey;autoIncrement"`
+	UserID     uint64           `gorm:"index;not null"`
+	QuestionID uint64           `gorm:"index;not null"`
+	GoalID     uint64           `gorm:"index;not null"`
+	Question   SkinGoalQuestion `gorm:"foreignKey:QuestionID;references:ID;constraint:OnDelete:CASCADE"`
 }
