@@ -272,6 +272,7 @@ func GetUserOnboarding(userID uint64) (resdto.BaseResponse, error) {
 		base = resdto.BaseResponse{IsSuccess: false, Message: "db not initialized"}
 		return base, errors.New("db not initialized")
 	}
+
 	var resp resdto.UserOnboardingResponse
 	var qas []models.SkinConditionQuestionAnswer
 	if err := db.Where("user_id = ?", userID).Find(&qas).Error; err != nil {
