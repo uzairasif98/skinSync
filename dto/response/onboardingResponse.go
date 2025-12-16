@@ -1,36 +1,20 @@
 package response
 
-// DTOs for user's onboarding answers
-type SkinTypeAnswer struct {
-	QuestionID uint64 `json:"question_id"`
-	TypeID     uint64 `json:"type_id"`
-}
-
-type ConcernAnswer struct {
-	QuestionID uint64 `json:"question_id"`
-	ConcernID  uint64 `json:"concern_id"`
-}
-
-type LifeStyleAnswer struct {
-	QuestionID    uint64 `json:"question_id"`
-	DescriptionID uint64 `json:"description_id"`
-}
-
-type QuestionAnswer struct {
-	QuestionID uint64 `json:"question_id"`
+// OptionAnswer represents a selected option for a question with display text
+type OptionAnswer struct {
 	OptionID   uint64 `json:"option_id"`
+	OptionText string `json:"option_text,omitempty"`
 }
 
-type GoalAnswer struct {
-	QuestionID uint64 `json:"question_id"`
-	GoalID     uint64 `json:"goal_id"`
+// QuestionGroup groups selected options under a question and includes question text
+type QuestionGroup struct {
+	QuestionID   uint64         `json:"question_id"`
+	QuestionText string         `json:"question_text,omitempty"`
+	Options      []OptionAnswer `json:"options"`
 }
 
+// UserOnboardingResponse contains grouped questions (single onboarding step)
 type UserOnboardingResponse struct {
-	SkinTypes      []SkinTypeAnswer  `json:"skin_types"`
-	Concerns       []ConcernAnswer   `json:"concerns"`
-	Lifestyles     []LifeStyleAnswer `json:"lifestyles"`
-	Questions      []QuestionAnswer  `json:"questions"`
-	Goals          []GoalAnswer      `json:"goals"`
-	CompletedSteps []string          `json:"completed_steps"`
+	Questions      []QuestionGroup `json:"questions"`
+	CompletedSteps []string        `json:"completed_steps"`
 }

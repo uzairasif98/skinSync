@@ -35,6 +35,12 @@ func SetupRoutes(e *echo.Group) {
 		// onboarding protected endpoints
 		api.POST("/onboarding/answer", controllers.SaveOnboardingHandler)
 		api.GET("/onboarding/user", controllers.GetUserOnboardingHandler)
+		// admin endpoints for onboarding masters
+		api.POST("/admin/onboarding/question", controllers.AdminCreateQuestionHandler)
+		api.POST("/admin/onboarding/question/:id/options", controllers.AdminAddOptionsHandler)
+		api.PUT("/admin/onboarding/question/:id", controllers.AdminUpdateQuestionHandler)
+		api.DELETE("/admin/onboarding/question/:id", controllers.AdminDeleteQuestionHandler)
+		api.DELETE("/admin/onboarding/question/:qid/options/:optionId", controllers.AdminDeleteOptionHandler)
 
 	}
 

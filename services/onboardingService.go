@@ -11,171 +11,343 @@ import (
 )
 
 type OnboardingMasters struct {
-	SkinTypes  []models.SkinTypeQuestion      `json:"skin_types"`
-	Concerns   []models.ConcernQuestion       `json:"concerns"`
-	Lifestyles []models.LifeStyleQuestion     `json:"lifestyles"`
-	Questions  []models.SkinConditionQuestion `json:"questions"` // preloaded with Options
-	Goals      []models.SkinGoalQuestion      `json:"goals"`
+	Questions []models.SkinConditionQuestion `json:"questions"` // preloaded with Options
 }
 
-func GetOnboardingMasters() (*OnboardingMasters, error) {
+func GetOnboardingMasters() (resdto.BaseResponse, error) {
+	var base resdto.BaseResponse
 	db := config.DB
 	if db == nil {
-		return nil, errors.New("db not initialized")
+		base = resdto.BaseResponse{IsSuccess: false, Message: "db not initialized"}
+		return base, errors.New("db not initialized")
 	}
 	var masters OnboardingMasters
-	if err := db.Preload("Options").Find(&masters.SkinTypes).Error; err != nil {
-		return nil, err
-	}
-	if err := db.Preload("Options").Find(&masters.Concerns).Error; err != nil {
-		return nil, err
-	}
-	if err := db.Preload("Options").Find(&masters.Lifestyles).Error; err != nil {
-		return nil, err
-	}
 	// preload options for questions
-	if err := db.Preload("Options").Preload("Options").Find(&masters.Questions).Error; err != nil {
-		return nil, err
+	if err := db.Preload("Options").Find(&masters.Questions).Error; err != nil {
+		base = resdto.BaseResponse{IsSuccess: false, Message: err.Error()}
+		return base, err
 	}
-	if err := db.Preload("Options").Find(&masters.Goals).Error; err != nil {
-		return nil, err
+	base = resdto.BaseResponse{IsSuccess: true, Message: "", Data: masters}
+	return base, nil
+}
+
+// CreateOnboardingQuestion creates a question and its options.
+func CreateOnboardingQuestion(req reqdto.CreateQuestionRequest) (resdto.BaseResponse, error) {
+	var base resdto.BaseResponse
+	db := config.DB
+	if db == nil {
+		base = resdto.BaseResponse{IsSuccess: false, Message: "db not initialized"}
+		return base, errors.New("db not initialized")
 	}
-	return &masters, nil
+
+	q := models.SkinConditionQuestion{QuestionText: req.QuestionText}
+	if err := db.Create(&q).Error; err != nil {
+		base = resdto.BaseResponse{IsSuccess: false, Message: err.Error()}
+		return base, err
+	}
+
+	// insert options
+	for _, optText := range req.Options {
+		o := models.SkinConditionQuestionOption{QuestionID: q.ID, OptionText: optText}
+		if err := db.Create(&o).Error; err != nil {
+			base = resdto.BaseResponse{IsSuccess: false, Message: err.Error()}
+			return base, err
+		}
+	}
+
+	// reload question with options
+	if err := db.Preload("Options").First(&q, q.ID).Error; err != nil {
+		base = resdto.BaseResponse{IsSuccess: false, Message: err.Error()}
+		return base, err
+	}
+
+	base = resdto.BaseResponse{IsSuccess: true, Message: "created", Data: q}
+	return base, nil
+}
+
+// AddOptionsToQuestion adds options to an existing question by id (string id accepted)
+func AddOptionsToQuestion(qidStr string, req reqdto.AddOptionsRequest) (resdto.BaseResponse, error) {
+	var base resdto.BaseResponse
+	db := config.DB
+	if db == nil {
+		base = resdto.BaseResponse{IsSuccess: false, Message: "db not initialized"}
+		return base, errors.New("db not initialized")
+	}
+
+	// parse qid
+	var q models.SkinConditionQuestion
+	if err := db.First(&q, qidStr).Error; err != nil {
+		base = resdto.BaseResponse{IsSuccess: false, Message: "question not found"}
+		return base, err
+	}
+
+	for _, optText := range req.Options {
+		o := models.SkinConditionQuestionOption{QuestionID: q.ID, OptionText: optText}
+		if err := db.Create(&o).Error; err != nil {
+			base = resdto.BaseResponse{IsSuccess: false, Message: err.Error()}
+			return base, err
+		}
+	}
+
+	if err := db.Preload("Options").First(&q, q.ID).Error; err != nil {
+		base = resdto.BaseResponse{IsSuccess: false, Message: err.Error()}
+		return base, err
+	}
+
+	base = resdto.BaseResponse{IsSuccess: true, Message: "options added", Data: q}
+	return base, nil
+}
+
+// UpdateOnboardingQuestion updates question text and optionally replaces or adds options.
+func UpdateOnboardingQuestion(qidStr string, req reqdto.UpdateQuestionRequest) (resdto.BaseResponse, error) {
+	var base resdto.BaseResponse
+	db := config.DB
+	if db == nil {
+		base = resdto.BaseResponse{IsSuccess: false, Message: "db not initialized"}
+		return base, errors.New("db not initialized")
+	}
+
+	var q models.SkinConditionQuestion
+	if err := db.Preload("Options").First(&q, qidStr).Error; err != nil {
+		base = resdto.BaseResponse{IsSuccess: false, Message: "question not found"}
+		return base, err
+	}
+
+	// update question text if provided
+	if req.QuestionText != nil {
+		q.QuestionText = *req.QuestionText
+		if err := db.Save(&q).Error; err != nil {
+			base = resdto.BaseResponse{IsSuccess: false, Message: err.Error()}
+			return base, err
+		}
+	}
+
+	// handle options
+	if req.ReplaceOptions {
+		// delete existing options
+		if err := db.Where("question_id = ?", q.ID).Delete(&models.SkinConditionQuestionOption{}).Error; err != nil {
+			base = resdto.BaseResponse{IsSuccess: false, Message: err.Error()}
+			return base, err
+		}
+		// insert unique options
+		seen := make(map[string]bool)
+		for _, optText := range req.Options {
+			if strings.TrimSpace(optText) == "" {
+				continue
+			}
+			if seen[optText] {
+				continue
+			}
+			seen[optText] = true
+			o := models.SkinConditionQuestionOption{QuestionID: q.ID, OptionText: optText}
+			if err := db.Create(&o).Error; err != nil {
+				base = resdto.BaseResponse{IsSuccess: false, Message: err.Error()}
+				return base, err
+			}
+		}
+	} else if len(req.Options) > 0 {
+		// add options that don't already exist
+		for _, optText := range req.Options {
+			if strings.TrimSpace(optText) == "" {
+				continue
+			}
+			var existing models.SkinConditionQuestionOption
+			if err := db.Where("question_id = ? AND option_text = ?", q.ID, optText).First(&existing).Error; err == nil {
+				// exists: skip (idempotent)
+				continue
+			}
+			o := models.SkinConditionQuestionOption{QuestionID: q.ID, OptionText: optText}
+			if err := db.Create(&o).Error; err != nil {
+				base = resdto.BaseResponse{IsSuccess: false, Message: err.Error()}
+				return base, err
+			}
+		}
+	}
+
+	// reload
+	if err := db.Preload("Options").First(&q, q.ID).Error; err != nil {
+		base = resdto.BaseResponse{IsSuccess: false, Message: err.Error()}
+		return base, err
+	}
+
+	base = resdto.BaseResponse{IsSuccess: true, Message: "updated", Data: q}
+	return base, nil
+}
+
+// DeleteOnboardingQuestion deletes a question and its options.
+func DeleteOnboardingQuestion(qidStr string) (resdto.BaseResponse, error) {
+	var base resdto.BaseResponse
+	db := config.DB
+	if db == nil {
+		base = resdto.BaseResponse{IsSuccess: false, Message: "db not initialized"}
+		return base, errors.New("db not initialized")
+	}
+
+	var q models.SkinConditionQuestion
+	if err := db.First(&q, qidStr).Error; err != nil {
+		base = resdto.BaseResponse{IsSuccess: false, Message: "question not found"}
+		return base, err
+	}
+
+	if err := db.Delete(&q).Error; err != nil {
+		base = resdto.BaseResponse{IsSuccess: false, Message: err.Error()}
+		return base, err
+	}
+
+	base = resdto.BaseResponse{IsSuccess: true, Message: "deleted"}
+	return base, nil
+}
+
+// DeleteOnboardingOption deletes a single option under a question.
+func DeleteOnboardingOption(qidStr string, oidStr string) (resdto.BaseResponse, error) {
+	var base resdto.BaseResponse
+	db := config.DB
+	if db == nil {
+		base = resdto.BaseResponse{IsSuccess: false, Message: "db not initialized"}
+		return base, errors.New("db not initialized")
+	}
+
+	var o models.SkinConditionQuestionOption
+	if err := db.Where("question_id = ? AND id = ?", qidStr, oidStr).First(&o).Error; err != nil {
+		base = resdto.BaseResponse{IsSuccess: false, Message: "option not found"}
+		return base, err
+	}
+
+	if err := db.Delete(&o).Error; err != nil {
+		base = resdto.BaseResponse{IsSuccess: false, Message: err.Error()}
+		return base, err
+	}
+
+	base = resdto.BaseResponse{IsSuccess: true, Message: "option deleted"}
+	return base, nil
 }
 
 // SaveOnboardingAnswer saves user's answers for a specific onboarding step.
-func SaveOnboardingAnswer(userID uint64, req reqdto.OnboardingAnswerRequest) error {
+func SaveOnboardingAnswer(userID uint64, req reqdto.OnboardingAnswerRequest) (resdto.BaseResponse, error) {
+	var base resdto.BaseResponse
 	db := config.DB
 	if db == nil {
-		return errors.New("db not initialized")
+		base = resdto.BaseResponse{IsSuccess: false, Message: "db not initialized"}
+		return base, errors.New("db not initialized")
 	}
-	step := strings.ToLower(req.Step)
-	switch step {
-	case "skin_type", "skintype", "skin_types":
-		for _, a := range req.Answers {
-			// remove existing answer for this user+question
-			if err := db.Where("user_id = ? AND question_id = ?", userID, a.QuestionID).Delete(&models.SkinType{}).Error; err != nil {
-				return err
-			}
-			st := models.SkinType{UserID: userID, QuestionID: a.QuestionID, TypeID: a.OptionID}
-			if err := db.Create(&st).Error; err != nil {
-				return err
-			}
+
+	// Accept a few possible step names; if provided and unknown, return error.
+	step := strings.ToLower(strings.TrimSpace(req.Step))
+	if step != "" && step != "onboarding" && step != "questions" && step != "answers" && step != "onboard" {
+		base = resdto.BaseResponse{IsSuccess: false, Message: "unknown onboarding step"}
+		return base, errors.New("unknown onboarding step")
+	}
+
+	// Group options by question_id so we can replace per-question answers
+	byQ := make(map[uint64][]uint64)
+	for _, a := range req.Answers {
+		byQ[a.QuestionID] = append(byQ[a.QuestionID], a.OptionID)
+	}
+
+	for qID, opts := range byQ {
+		// delete existing answers for this user + question
+		if err := db.Where("user_id = ? AND question_id = ?", userID, qID).Delete(&models.SkinConditionQuestionAnswer{}).Error; err != nil {
+			base = resdto.BaseResponse{IsSuccess: false, Message: err.Error()}
+			return base, err
 		}
-		return nil
-	case "concern", "concerns":
-		for _, a := range req.Answers {
-			if err := db.Where("user_id = ? AND question_id = ?", userID, a.QuestionID).Delete(&models.SkinConcern{}).Error; err != nil {
-				return err
-			}
-			sc := models.SkinConcern{UserID: userID, QuestionID: a.QuestionID, ConcernID: a.OptionID}
-			if err := db.Create(&sc).Error; err != nil {
-				return err
-			}
-		}
-		return nil
-	case "lifestyle", "lifestyles", "life_style", "lifestyledescription":
-		for _, a := range req.Answers {
-			if err := db.Where("user_id = ? AND question_id = ?", userID, a.QuestionID).Delete(&models.LifeStyleDescription{}).Error; err != nil {
-				return err
-			}
-			ls := models.LifeStyleDescription{UserID: userID, QuestionID: a.QuestionID, DescriptionID: a.OptionID}
-			if err := db.Create(&ls).Error; err != nil {
-				return err
-			}
-		}
-		return nil
-	case "question", "questions", "condition", "conditions":
-		for _, a := range req.Answers {
-			if err := db.Where("user_id = ? AND question_id = ?", userID, a.QuestionID).Delete(&models.SkinConditionQuestionAnswer{}).Error; err != nil {
-				return err
-			}
-			qa := models.SkinConditionQuestionAnswer{UserID: userID, QuestionID: a.QuestionID, OptionID: a.OptionID}
+		// insert new answers (one record per selected option)
+		for _, opt := range opts {
+			qa := models.SkinConditionQuestionAnswer{UserID: userID, QuestionID: qID, OptionID: opt}
 			if err := db.Create(&qa).Error; err != nil {
-				return err
+				base = resdto.BaseResponse{IsSuccess: false, Message: err.Error()}
+				return base, err
 			}
 		}
-		return nil
-	case "goal", "goals":
-		for _, a := range req.Answers {
-			if err := db.Where("user_id = ? AND question_id = ?", userID, a.QuestionID).Delete(&models.UserSkinGoal{}).Error; err != nil {
-				return err
-			}
-			ug := models.UserSkinGoal{UserID: userID, QuestionID: a.QuestionID, GoalID: a.OptionID}
-			if err := db.Create(&ug).Error; err != nil {
-				return err
-			}
-		}
-		return nil
-	default:
-		return errors.New("unknown onboarding step")
 	}
+
+	base = resdto.BaseResponse{IsSuccess: true, Message: "saved"}
+	return base, nil
 }
 
 // GetUserOnboarding returns all saved answers for a user.
-func GetUserOnboarding(userID uint64) (*resdto.UserOnboardingResponse, error) {
+func GetUserOnboarding(userID uint64) (resdto.BaseResponse, error) {
+	var base resdto.BaseResponse
 	db := config.DB
 	if db == nil {
-		return nil, errors.New("db not initialized")
+		base = resdto.BaseResponse{IsSuccess: false, Message: "db not initialized"}
+		return base, errors.New("db not initialized")
 	}
 	var resp resdto.UserOnboardingResponse
-
-	var sTypes []models.SkinType
-	if err := db.Where("user_id = ?", userID).Find(&sTypes).Error; err != nil {
-		return nil, err
-	}
-	for _, s := range sTypes {
-		resp.SkinTypes = append(resp.SkinTypes, resdto.SkinTypeAnswer{QuestionID: s.QuestionID, TypeID: s.TypeID})
-	}
-
-	var concerns []models.SkinConcern
-	if err := db.Where("user_id = ?", userID).Find(&concerns).Error; err != nil {
-		return nil, err
-	}
-	for _, c := range concerns {
-		resp.Concerns = append(resp.Concerns, resdto.ConcernAnswer{QuestionID: c.QuestionID, ConcernID: c.ConcernID})
-	}
-
-	var lifestyles []models.LifeStyleDescription
-	if err := db.Where("user_id = ?", userID).Find(&lifestyles).Error; err != nil {
-		return nil, err
-	}
-	for _, l := range lifestyles {
-		resp.Lifestyles = append(resp.Lifestyles, resdto.LifeStyleAnswer{QuestionID: l.QuestionID, DescriptionID: l.DescriptionID})
-	}
-
 	var qas []models.SkinConditionQuestionAnswer
 	if err := db.Where("user_id = ?", userID).Find(&qas).Error; err != nil {
-		return nil, err
+		base = resdto.BaseResponse{IsSuccess: false, Message: err.Error()}
+		return base, err
 	}
+
+	// collect unique question IDs and option IDs preserving occurrence order
+	questionOrder := make([]uint64, 0)
+	seenQuestions := make(map[uint64]bool)
+	optionIDs := make([]uint64, 0, len(qas))
 	for _, q := range qas {
-		resp.Questions = append(resp.Questions, resdto.QuestionAnswer{QuestionID: q.QuestionID, OptionID: q.OptionID})
+		if !seenQuestions[q.QuestionID] {
+			seenQuestions[q.QuestionID] = true
+			questionOrder = append(questionOrder, q.QuestionID)
+		}
+		optionIDs = append(optionIDs, q.OptionID)
 	}
 
-	var goals []models.UserSkinGoal
-	if err := db.Where("user_id = ?", userID).Find(&goals).Error; err != nil {
-		return nil, err
-	}
-	for _, g := range goals {
-		resp.Goals = append(resp.Goals, resdto.GoalAnswer{QuestionID: g.QuestionID, GoalID: g.GoalID})
+	// fetch option texts
+	optionTextMap := make(map[uint64]string)
+	if len(optionIDs) > 0 {
+		var opts []models.SkinConditionQuestionOption
+		if err := db.Where("id IN ?", optionIDs).Find(&opts).Error; err != nil {
+			base = resdto.BaseResponse{IsSuccess: false, Message: err.Error()}
+			return base, err
+		}
+		for _, o := range opts {
+			optionTextMap[o.ID] = o.OptionText
+		}
 	}
 
-	// mark completed steps (simple heuristic)
-	if len(resp.SkinTypes) > 0 {
-		resp.CompletedSteps = append(resp.CompletedSteps, "skin_type")
+	// fetch question texts
+	questionTextMap := make(map[uint64]string)
+	if len(questionOrder) > 0 {
+		var qMasters []models.SkinConditionQuestion
+		if err := db.Where("id IN ?", questionOrder).Find(&qMasters).Error; err != nil {
+			base = resdto.BaseResponse{IsSuccess: false, Message: err.Error()}
+			return base, err
+		}
+		for _, qm := range qMasters {
+			questionTextMap[qm.ID] = qm.QuestionText
+		}
 	}
-	if len(resp.Concerns) > 0 {
-		resp.CompletedSteps = append(resp.CompletedSteps, "concerns")
+
+	// group options per question
+	optionsByQuestion := make(map[uint64][]resdto.OptionAnswer)
+	for _, q := range qas {
+		oa := resdto.OptionAnswer{OptionID: q.OptionID}
+		if txt, ok := optionTextMap[q.OptionID]; ok {
+			oa.OptionText = txt
+		}
+		// avoid duplicates
+		exists := false
+		for _, ex := range optionsByQuestion[q.QuestionID] {
+			if ex.OptionID == oa.OptionID {
+				exists = true
+				break
+			}
+		}
+		if !exists {
+			optionsByQuestion[q.QuestionID] = append(optionsByQuestion[q.QuestionID], oa)
+		}
 	}
-	if len(resp.Lifestyles) > 0 {
-		resp.CompletedSteps = append(resp.CompletedSteps, "lifestyles")
+
+	// build grouped response preserving question order
+	for _, qid := range questionOrder {
+		qg := resdto.QuestionGroup{QuestionID: qid, QuestionText: questionTextMap[qid], Options: optionsByQuestion[qid]}
+		resp.Questions = append(resp.Questions, qg)
 	}
+
+	resp.CompletedSteps = []string{}
 	if len(resp.Questions) > 0 {
-		resp.CompletedSteps = append(resp.CompletedSteps, "questions")
-	}
-	if len(resp.Goals) > 0 {
-		resp.CompletedSteps = append(resp.CompletedSteps, "goals")
+		resp.CompletedSteps = append(resp.CompletedSteps, "onboarding")
 	}
 
-	return &resp, nil
+	base = resdto.BaseResponse{IsSuccess: true, Message: "", Data: resp}
+	return base, nil
 }

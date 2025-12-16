@@ -69,22 +69,10 @@ func ConnectDB() {
 		&models.Permission{},
 		&models.RolePermission{},
 		&models.UserRole{},
-		// onboarding question/option tables
-		&models.SkinTypeQuestion{},
-		&models.SkinTypeOption{},
-		&models.SkinType{},
-		&models.ConcernQuestion{},
-		&models.ConcernOption{},
-		&models.SkinConcern{},
-		&models.LifeStyleQuestion{},
-		&models.LifeStyleDescriptionOption{},
-		&models.LifeStyleDescription{},
+		// onboarding question/option/answer tables (single-step)
 		&models.SkinConditionQuestion{},
 		&models.SkinConditionQuestionOption{},
 		&models.SkinConditionQuestionAnswer{},
-		&models.SkinGoalQuestion{},
-		&models.SkinGoal{},
-		&models.UserSkinGoal{},
 	); err != nil {
 		// attempt to close DB on migration error
 		if cerr := CloseDB(); cerr != nil {
@@ -120,43 +108,19 @@ func SeedOnboardingData() {
 		return
 	}
 
-	// Step 1 skin types (as a question with options)
-	skinTypes := []string{"Normal", "Oily", "Dry", "Combination", "Sensitive"}
-	var stq models.SkinTypeQuestion
-	qText := "Which of these best describes your skin type?"
-	db.Where("question_text = ?", qText).FirstOrCreate(&stq, models.SkinTypeQuestion{QuestionText: qText})
-	for _, name := range skinTypes {
-		var o models.SkinTypeOption
-		db.Where("question_id = ? AND name = ?", stq.ID, name).FirstOrCreate(&o, models.SkinTypeOption{QuestionID: stq.ID, Name: name})
-	}
-
-	// Step 2 concerns (question + options)
-	concerns := []string{"Acne", "Aging", "Hyperpigmentation", "Redness", "Sensitivity"}
-	var cq models.ConcernQuestion
-	cqText := "Which skin concerns do you have?"
-	db.Where("question_text = ?", cqText).FirstOrCreate(&cq, models.ConcernQuestion{QuestionText: cqText})
-	for _, name := range concerns {
-		var o models.ConcernOption
-		db.Where("question_id = ? AND name = ?", cq.ID, name).FirstOrCreate(&o, models.ConcernOption{QuestionID: cq.ID, Name: name})
-	}
-
-	// Step 3 lifestyles (question + options)
-	lifestyles := []string{"Smoker", "High Stress", "Poor Sleep", "Active", "Vegetarian"}
-	var lq models.LifeStyleQuestion
-	lqText := "Which lifestyle factors apply to you?"
-	db.Where("question_text = ?", lqText).FirstOrCreate(&lq, models.LifeStyleQuestion{QuestionText: lqText})
-	for _, name := range lifestyles {
-		var o models.LifeStyleDescriptionOption
-		db.Where("question_id = ? AND name = ?", lq.ID, name).FirstOrCreate(&o, models.LifeStyleDescriptionOption{QuestionID: lq.ID, Name: name})
-	}
-
-	// Step 4 questions + options (already in Question/Option form)
+	// Seed only the single onboarding questions and their options (idempotent)
 	questions := []struct {
 		Text    string
 		Options []string
 	}{
 		{"How often do you experience breakouts?", []string{"Never", "Sometimes", "Often", "Always"}},
 		{"How sensitive is your skin to new products?", []string{"Not sensitive", "Slightly", "Moderately", "Very"}},
+		{"How would you describe your skin's oiliness?", []string{"Very oily", "Oily", "Normal", "Dry", "Very dry"}},
+		{"How often do you use sunscreen?", []string{"Never", "Sometimes", "Always"}},
+		{"Do you notice visible pores?", []string{"No", "Yes - small", "Yes - large"}},
+		{"How would you rate hyperpigmentation / dark spots?", []string{"None", "Mild", "Moderate", "Severe"}},
+		{"How often do you exfoliate?", []string{"Never", "Monthly", "Weekly", "2-3 times/week"}},
+		{"How often do you experience redness?", []string{"Never", "Sometimes", "Often", "Always"}},
 	}
 	for _, q := range questions {
 		var qq models.SkinConditionQuestion
@@ -166,15 +130,5 @@ func SeedOnboardingData() {
 			var o models.SkinConditionQuestionOption
 			db.Where("question_id = ? AND option_text = ?", qq.ID, opt).FirstOrCreate(&o, models.SkinConditionQuestionOption{QuestionID: qq.ID, OptionText: opt})
 		}
-	}
-
-	// Step 5 goals (question + options)
-	goals := []string{"Hydration", "Brightening", "Reduce Breakouts", "Anti-Age"}
-	var gq models.SkinGoalQuestion
-	gqText := "What are your skin goals?"
-	db.Where("question_text = ?", gqText).FirstOrCreate(&gq, models.SkinGoalQuestion{QuestionText: gqText})
-	for _, name := range goals {
-		var o models.SkinGoal
-		db.Where("question_id = ? AND name = ?", gq.ID, name).FirstOrCreate(&o, models.SkinGoal{QuestionID: gq.ID, Name: name})
 	}
 }
