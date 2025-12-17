@@ -14,3 +14,28 @@ type AuthProvider struct {
 	AppleUID     *string `gorm:"size:255;uniqueIndex:idx_provider_appleuid"`
 	CreatedAt    time.Time
 }
+
+// UserProfile - stores user profile details
+type UserProfile struct {
+	UserProfileID uint64 `gorm:"primaryKey;autoIncrement"`
+
+	UserID uint64 `gorm:"not null;index:idx_user_id"`
+
+	Name string `gorm:"size:100;not null"`
+
+	PhoneNumber *string `gorm:"size:20"`
+
+	EmailAddress *string `gorm:"size:150;unique"`
+
+	Location *string `gorm:"size:550"`
+
+	Bio *string `gorm:"type:text"`
+
+	ProfileImagePath *string `gorm:"size:255"`
+
+	CreatedAt time.Time
+	UpdatedAt time.Time
+
+	// Relationship - UserProfile belongs to User
+	User User `gorm:"foreignKey:UserID;references:ID;constraint:OnDelete:CASCADE" json:"-"`
+}

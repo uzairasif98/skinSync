@@ -2,12 +2,15 @@ package services
 
 import (
 	"errors"
+	"regexp"
 	"strings"
 
 	"skinSync/config"
 	reqdto "skinSync/dto/request"
 	resdto "skinSync/dto/response"
 	"skinSync/models"
+
+	"gorm.io/gorm"
 )
 
 type OnboardingMasters struct {
@@ -261,6 +264,109 @@ func SaveOnboardingAnswer(userID uint64, req reqdto.OnboardingAnswerRequest) (re
 	}
 
 	base = resdto.BaseResponse{IsSuccess: true, Message: "saved"}
+	return base, nil
+}
+
+// SaveOnboardingProfile saves or updates user's profile information during onboarding.
+func SaveOnboardingProfile(userID uint64, req reqdto.UserProfileRequest) (resdto.BaseResponse, error) {
+	var base resdto.BaseResponse
+	db := config.DB
+
+	if db == nil {
+		base = resdto.BaseResponse{IsSuccess: false, Message: "db not initialized"}
+		return base, errors.New("db not initialized")
+	}
+
+	// --------------------
+	// Basic validations
+	// --------------------
+
+	// Email regex (basic, safe)
+	emailRegex := regexp.MustCompile(`^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$`)
+	if req.EmailAddress != nil && !emailRegex.MatchString(*req.EmailAddress) {
+		base = resdto.BaseResponse{IsSuccess: false, Message: "invalid email address"}
+		return base, errors.New("invalid email address")
+	}
+
+	// Phone regex (supports +countrycode, spaces, hyphens)
+	phoneRegex := regexp.MustCompile(`^\+?[0-9]{7,15}$`)
+	if req.PhoneNumber != nil && !phoneRegex.MatchString(*req.PhoneNumber) {
+		base = resdto.BaseResponse{IsSuccess: false, Message: "invalid phone number"}
+		return base, errors.New("invalid phone number")
+	}
+
+	// --------------------
+	// Check if profile exists
+	// --------------------
+	var profile models.UserProfile
+	err := db.Where("user_id = ?", userID).First(&profile).Error
+
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		// --------------------
+		// Create new profile
+		// --------------------
+		profile = models.UserProfile{
+			UserID:           userID,
+			Name:             req.Name,
+			PhoneNumber:      req.PhoneNumber,
+			EmailAddress:     req.EmailAddress,
+			Location:         req.Location,
+			Bio:              req.Bio,
+			ProfileImagePath: req.ProfileImageURL,
+		}
+
+		if err := db.Create(&profile).Error; err != nil {
+			base = resdto.BaseResponse{IsSuccess: false, Message: err.Error()}
+			return base, err
+		}
+
+	} else if err != nil {
+		// Any other DB error
+		base = resdto.BaseResponse{IsSuccess: false, Message: err.Error()}
+		return base, err
+
+	} else {
+		// --------------------
+		// Update existing profile
+		// --------------------
+		profile.Name = req.Name
+		profile.PhoneNumber = req.PhoneNumber
+		profile.EmailAddress = req.EmailAddress
+		profile.Location = req.Location
+		profile.Bio = req.Bio
+		profile.ProfileImagePath = req.ProfileImageURL
+
+		if err := db.Save(&profile).Error; err != nil {
+			base = resdto.BaseResponse{IsSuccess: false, Message: err.Error()}
+			return base, err
+		}
+	}
+
+	base = resdto.BaseResponse{
+		IsSuccess: true,
+		Message:   "user profile saved successfully",
+	}
+	return base, nil
+}
+
+// GetOnboardingProfile fetches user's saved profile information.
+func GetOnboardingProfile(userID uint64) (resdto.BaseResponse, error) {
+	var base resdto.BaseResponse
+	db := config.DB
+	if db == nil {
+		base = resdto.BaseResponse{IsSuccess: false, Message: "db not initialized"}
+		return base, errors.New("db not initialized")
+	}
+	var profile models.UserProfile
+	err := db.Where("user_id = ?", userID).First(&profile).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		base = resdto.BaseResponse{IsSuccess: false, Message: "user profile not found"}
+		return base, err
+	} else if err != nil {
+		base = resdto.BaseResponse{IsSuccess: false, Message: err.Error()}
+		return base, err
+	}
+	base = resdto.BaseResponse{IsSuccess: true, Message: "", Data: profile}
 	return base, nil
 }
 

@@ -34,6 +34,9 @@ func SetupRoutes(e *echo.Group) {
 		api.POST("/auth/refresh", controllers.RefreshTokenHandler)
 		// onboarding protected endpoints
 		api.POST("/onboarding/answer", controllers.SaveOnboardingHandler)
+		api.POST("/onboarding/profile", controllers.SaveProfileHandler)
+		api.GET("/onboarding/fetchprofile", controllers.GetUserProfileHandler)
+
 		api.GET("/onboarding/user", controllers.GetUserOnboardingHandler)
 		// admin endpoints for onboarding masters
 		api.POST("/admin/onboarding/question", controllers.AdminCreateQuestionHandler)

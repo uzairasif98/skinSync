@@ -73,6 +73,7 @@ func ConnectDB() {
 		&models.SkinConditionQuestion{},
 		&models.SkinConditionQuestionOption{},
 		&models.SkinConditionQuestionAnswer{},
+		&models.UserProfile{},
 	); err != nil {
 		// attempt to close DB on migration error
 		if cerr := CloseDB(); cerr != nil {

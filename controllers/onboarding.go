@@ -120,6 +120,72 @@ func SaveOnboardingHandler(c echo.Context) error {
 	return c.JSON(http.StatusOK, base)
 }
 
+// SaveProfileHandler saves user's profile information during onboarding
+func SaveProfileHandler(c echo.Context) error {
+	var req reqdto.UserProfileRequest
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, resdto.BaseResponse{IsSuccess: false, Message: err.Error()})
+	}
+
+	// extract user id from context (set by auth middleware)
+	uid := c.Get("user_id")
+	var userID uint64
+	switch v := uid.(type) {
+	case float64:
+		userID = uint64(v)
+	case string:
+		id, err := strconv.ParseUint(v, 10, 64)
+		if err != nil {
+			return c.JSON(http.StatusUnauthorized, resdto.BaseResponse{IsSuccess: false, Message: "invalid user id in token"})
+		}
+		userID = id
+	case int:
+		userID = uint64(v)
+	case int64:
+		userID = uint64(v)
+	default:
+		return c.JSON(http.StatusUnauthorized, resdto.BaseResponse{IsSuccess: false, Message: "invalid user id in token"})
+	}
+
+	base, err := services.SaveOnboardingProfile(userID, req)
+	if err != nil {
+		// service already provided base with message
+		return c.JSON(http.StatusInternalServerError, base)
+	}
+	return c.JSON(http.StatusOK, base)
+}
+
+func GetUserProfileHandler(c echo.Context) error {
+	uid := c.Get("user_id")
+
+	var userID uint64
+	switch v := uid.(type) {
+	case float64:
+		userID = uint64(v)
+	case string:
+		id, err := strconv.ParseUint(v, 10, 64)
+		if err != nil {
+			return c.JSON(http.StatusUnauthorized,
+				resdto.BaseResponse{IsSuccess: false, Message: "invalid user id"})
+		}
+		userID = id
+	case int:
+		userID = uint64(v)
+	case int64:
+		userID = uint64(v)
+	default:
+		return c.JSON(http.StatusUnauthorized,
+			resdto.BaseResponse{IsSuccess: false, Message: "invalid user id"})
+	}
+
+	resp, err := services.GetOnboardingProfile(userID)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, resp)
+	}
+
+	return c.JSON(http.StatusOK, resp)
+}
+
 // GetUserOnboardingHandler returns user's saved onboarding answers and progress
 func GetUserOnboardingHandler(c echo.Context) error {
 	uid := c.Get("user_id")
