@@ -29,48 +29,8 @@ func Login(r reqdto.LoginRequest) (*resdto.LoginResponse, error) {
 
 	switch r.Provider {
 	case "email":
-		if r.Email == nil || r.Password == nil {
-			return nil, errors.New("email and password required")
-		}
-		if err = db.Where("provider = ? AND email = ?", "email", *r.Email).First(&provider).Error; err == nil {
-			// found provider -> verify password
-			if provider.PasswordHash == nil || !CheckPasswordHash(*r.Password, *provider.PasswordHash) {
-				return nil, errors.New("invalid credentials")
-			}
-			if err = db.First(&user, provider.UserID).Error; err != nil {
-				return nil, err
-			}
-		} else if errors.Is(err, gorm.ErrRecordNotFound) {
-			// no provider -> find user by primary_email
-			if err = db.Where("primary_email = ?", *r.Email).First(&user).Error; err == nil {
-				hashed, e := HashPassword(*r.Password)
-				if e != nil {
-					return nil, e
-				}
-				p := models.AuthProvider{UserID: user.ID, Provider: "email", Email: r.Email, PasswordHash: &hashed}
-				if err = db.Create(&p).Error; err != nil {
-					return nil, err
-				}
-				provider = p
-			} else {
-				// create new user & provider
-				user = models.User{PrimaryEmail: r.Email, Status: "active"}
-				if err = db.Create(&user).Error; err != nil {
-					return nil, err
-				}
-				hashed, e := HashPassword(*r.Password)
-				if e != nil {
-					return nil, e
-				}
-				p := models.AuthProvider{UserID: user.ID, Provider: "email", Email: r.Email, PasswordHash: &hashed}
-				if err = db.Create(&p).Error; err != nil {
-					return nil, err
-				}
-				provider = p
-			}
-		} else {
-			return nil, err
-		}
+		// Email login is handled via OTP in controller
+		return nil, errors.New("email login should use OTP flow")
 
 	case "phone":
 		if r.Phone == nil {

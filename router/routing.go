@@ -20,6 +20,8 @@ func SetupRoutes(e *echo.Group) {
 	public := e.Group("")
 	{
 		public.POST("/login", controllers.Login)
+		// OTP verification (after login sends OTP)
+		public.POST("/verify-otp", controllers.VerifyOTPHandler)
 		// public masters for frontend to render step UI
 		public.GET("/onboarding/masters", controllers.GetOnboardingMastersHandler)
 
