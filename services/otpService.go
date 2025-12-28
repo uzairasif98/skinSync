@@ -4,6 +4,9 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"os"
+	"strconv"
+	"sync"
 	"time"
 
 	"skinSync/config"
@@ -15,11 +18,64 @@ import (
 	"gorm.io/gorm"
 )
 
-const (
-	otpLength     = 6
-	otpExpiry     = 5 * time.Minute
-	maxOTPAttempt = 5
+const otpLength = 6
+
+// getOTPExpiry returns OTP expiry duration from env (default 5 minutes)
+func getOTPExpiry() time.Duration {
+	minutes, err := strconv.Atoi(os.Getenv("OTP_EXPIRY_MINUTES"))
+	if err != nil || minutes <= 0 {
+		return 5 * time.Minute
+	}
+	return time.Duration(minutes) * time.Minute
+}
+
+// getResendCooldown returns resend cooldown from env (default 1 minute)
+func getResendCooldown() time.Duration {
+	minutes, err := strconv.Atoi(os.Getenv("OTP_RESEND_COOLDOWN_MINUTES"))
+	if err != nil || minutes <= 0 {
+		return 1 * time.Minute
+	}
+	return time.Duration(minutes) * time.Minute
+}
+
+// getMaxOTPAttempts returns max attempts from env (default 5)
+func getMaxOTPAttempts() int {
+	attempts, err := strconv.Atoi(os.Getenv("OTP_MAX_ATTEMPTS"))
+	if err != nil || attempts <= 0 {
+		return 5
+	}
+	return attempts
+}
+
+// OTPData stores OTP information in memory
+type OTPData struct {
+	Code       string
+	ExpiresAt  time.Time
+	LastSentAt time.Time
+	Attempts   int
+}
+
+// In-memory OTP store with mutex for thread safety
+var (
+	otpStore = make(map[string]OTPData)
+	otpMutex sync.Mutex
 )
+
+// StartOTPCleanup runs a background goroutine to clean expired OTPs
+func StartOTPCleanup() {
+	go func() {
+		for {
+			time.Sleep(1 * time.Minute)
+			otpMutex.Lock()
+			for email, otpData := range otpStore {
+				if time.Now().After(otpData.ExpiresAt) {
+					delete(otpStore, email)
+				}
+			}
+			otpMutex.Unlock()
+		}
+	}()
+}
 
 // GenerateOTP generates a random 6-digit OTP
 func GenerateOTP() (string, error) {
@@ -38,17 +94,16 @@ func GenerateOTP() (string, error) {
 	return string(otp), nil
 }
 
-// SendOTP generates OTP, saves to DB, and sends email
+// SendOTP generates OTP, stores in memory, and sends email
 func SendOTP(req reqdto.SendOTPRequest) (resdto.BaseResponse, error) {
-	db := config.DB
-	if db == nil {
-		return resdto.BaseResponse{IsSuccess: false, Message: "database not initialized"}, errors.New("database not initialized")
+	// Check rate limiting
+	otpMutex.Lock()
+	existingOTP, exists := otpStore[req.Email]
+	if exists && time.Since(existingOTP.LastSentAt) < getResendCooldown() {
+		otpMutex.Unlock()
+		return resdto.BaseResponse{IsSuccess: false, Message: "Please wait before requesting a new OTP"}, errors.New("rate limited")
 	}
-
-	// Invalidate any existing unused OTPs for this email
-	db.Model(&models.OTP{}).
-		Where("email = ? AND is_used = ?", req.Email, false).
-		Update("is_used", true)
+	otpMutex.Unlock()
 
 	// Generate new OTP
 	otpCode, err := GenerateOTP()
@@ -56,21 +111,22 @@ func SendOTP(req reqdto.SendOTPRequest) (resdto.BaseResponse, error) {
 		return resdto.BaseResponse{IsSuccess: false, Message: "failed to generate OTP"}, err
 	}
 
-	// Save OTP to database
-	otp := models.OTP{
-		Email:     req.Email,
-		OTPCode:   otpCode,
-		ExpiresAt: time.Now().Add(otpExpiry),
-		IsUsed:    false,
-		Attempts:  0,
+	// Store OTP in memory
+	otpMutex.Lock()
+	otpStore[req.Email] = OTPData{
+		Code:       otpCode,
+		ExpiresAt:  time.Now().Add(getOTPExpiry()),
+		LastSentAt: time.Now(),
+		Attempts:   0,
 	}
-
-	if err := db.Create(&otp).Error; err != nil {
-		return resdto.BaseResponse{IsSuccess: false, Message: "failed to save OTP"}, err
-	}
+	otpMutex.Unlock()
 
 	// Send OTP via email
 	if err := utils.SendOTPEmail(req.Email, otpCode); err != nil {
+		// Remove from store if email failed
+		otpMutex.Lock()
+		delete(otpStore, req.Email)
+		otpMutex.Unlock()
 		return resdto.BaseResponse{IsSuccess: false, Message: "failed to send OTP email"}, err
 	}
 
@@ -80,56 +136,58 @@ func SendOTP(req reqdto.SendOTPRequest) (resdto.BaseResponse, error) {
 	}, nil
 }
 
-// VerifyOTP verifies OTP and returns login response
+// VerifyOTP verifies OTP from memory and returns login response
 func VerifyOTP(req reqdto.VerifyOTPRequest) (*resdto.LoginResponse, error) {
 	db := config.DB
 	if db == nil {
 		return nil, errors.New("database not initialized")
 	}
 
-	// Find OTP record
-	var otp models.OTP
-	err := db.Where("email = ? AND is_used = ?", req.Email, false).
-		Order("created_at DESC").
-		First(&otp).Error
+	// Get OTP from memory
+	otpMutex.Lock()
+	otpData, exists := otpStore[req.Email]
+	otpMutex.Unlock()
 
-	if errors.Is(err, gorm.ErrRecordNotFound) {
+	if !exists {
 		return nil, errors.New("OTP not found. Please request a new one")
-	} else if err != nil {
-		return nil, err
 	}
 
 	// Check if OTP expired
-	if time.Now().After(otp.ExpiresAt) {
-		otp.IsUsed = true
-		db.Save(&otp)
+	if time.Now().After(otpData.ExpiresAt) {
+		otpMutex.Lock()
+		delete(otpStore, req.Email)
+		otpMutex.Unlock()
 		return nil, errors.New("OTP expired. Please request a new one")
 	}
 
 	// Check max attempts
-	if otp.Attempts >= maxOTPAttempt {
-		otp.IsUsed = true
-		db.Save(&otp)
+	if otpData.Attempts >= getMaxOTPAttempts() {
+		otpMutex.Lock()
+		delete(otpStore, req.Email)
+		otpMutex.Unlock()
 		return nil, errors.New("too many failed attempts. Please request a new OTP")
 	}
 
 	// Verify OTP code
-	if otp.OTPCode != req.OTP {
-		otp.Attempts++
-		db.Save(&otp)
-		remaining := maxOTPAttempt - otp.Attempts
+	if otpData.Code != req.OTP {
+		otpMutex.Lock()
+		otpData.Attempts++
+		otpStore[req.Email] = otpData
+		otpMutex.Unlock()
+		remaining := getMaxOTPAttempts() - otpData.Attempts
 		return nil, fmt.Errorf("invalid OTP. %d attempts remaining", remaining)
 	}
 
-	// Mark OTP as used
-	otp.IsUsed = true
-	db.Save(&otp)
+	// Remove OTP after successful verification
+	otpMutex.Lock()
+	delete(otpStore, req.Email)
+	otpMutex.Unlock()
 
 	// Find or create user
 	var user models.User
 	var provider models.AuthProvider
 
-	err = db.Where("provider = ? AND email = ?", "email", req.Email).First(&provider).Error
+	err := db.Where("provider = ? AND email = ?", "email", req.Email).First(&provider).Error
 	if err == nil {
 		// Provider exists, get user
 		if err = db.First(&user, provider.UserID).Error; err != nil {
