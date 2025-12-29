@@ -24,7 +24,8 @@ func SetupRoutes(e *echo.Group) {
 		public.POST("/verify-otp", controllers.VerifyOTPHandler)
 		// public masters for frontend to render step UI
 		public.GET("/onboarding/masters", controllers.GetOnboardingMastersHandler)
-
+		// treatment masters (public)
+		public.GET("/treatments/masters", controllers.GetTreatmentMastersHandler)
 	}
 
 	// Protected routes with authentication and logging
