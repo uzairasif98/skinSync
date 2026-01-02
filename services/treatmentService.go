@@ -4,70 +4,114 @@ import (
 	"skinSync/config"
 	resdto "skinSync/dto/response"
 	"skinSync/models"
-
-	"gorm.io/gorm"
 )
 
-// GetTreatmentMasters returns all treatment types with categories and treatments
+// GetTreatmentMasters returns all treatments
 func GetTreatmentMasters() (resdto.TreatmentMastersResponse, error) {
 	db := config.DB
 
-	var treatmentTypes []models.TreatmentType
+	var treatments []models.Treatment
 
-	// Fetch all active treatment types with their categories and treatments
-	err := db.Where("is_active = ?", true).
-		Order("display_order ASC").
-		Preload("Categories", func(db *gorm.DB) *gorm.DB {
-			return db.Where("is_active = ?", true).Order("display_order ASC")
-		}).
-		Preload("Categories.Treatments", func(db *gorm.DB) *gorm.DB {
-			return db.Where("is_active = ?", true).Order("display_order ASC")
-		}).
-		Find(&treatmentTypes).Error
-
+	err := db.Find(&treatments).Error
 	if err != nil {
 		return resdto.TreatmentMastersResponse{
 			IsSuccess: false,
-			Message:   "Failed to fetch treatment masters",
+			Message:   "Failed to fetch treatments",
+			Data:      nil,
 		}, err
 	}
 
 	// Convert to DTOs
-	var data []resdto.TreatmentTypeDTO
-	for _, tt := range treatmentTypes {
-		typeDTO := resdto.TreatmentTypeDTO{
-			ID:          tt.ID,
-			Name:        tt.Name,
-			Description: tt.Description,
-			Categories:  []resdto.TreatmentCategoryDTO{},
-		}
-
-		for _, cat := range tt.Categories {
-			catDTO := resdto.TreatmentCategoryDTO{
-				ID:         cat.ID,
-				Name:       cat.Name,
-				Treatments: []resdto.TreatmentDTO{},
-			}
-
-			for _, treat := range cat.Treatments {
-				treatDTO := resdto.TreatmentDTO{
-					ID:          treat.ID,
-					Name:        treat.Name,
-					Description: treat.Description,
-					MaxSyringes: treat.MaxSyringes,
-				}
-				catDTO.Treatments = append(catDTO.Treatments, treatDTO)
-			}
-
-			typeDTO.Categories = append(typeDTO.Categories, catDTO)
-		}
-
-		data = append(data, typeDTO)
+	var data []resdto.TreatmentDTO
+	for _, t := range treatments {
+		data = append(data, resdto.TreatmentDTO{
+			ID:          t.ID,
+			Name:        t.Name,
+			Icon:        t.Icon,
+			Description: t.Description,
+			IsArea:      t.IsArea,
+		})
 	}
 
 	return resdto.TreatmentMastersResponse{
 		IsSuccess: true,
-		Message:   "Treatment masters retrieved",
+		Message:   "Treatments retrieved successfully",
+		Data:      data,
+	}, nil
+}
+
+// GetAreasByTreatment returns all areas for a given treatment ID
+func GetAreasByTreatment(treatmentID uint) (resdto.AreasResponse, error) {
+	db := config.DB
+
+	var areas []models.Area
+
+	err := db.Where("treatment_id = ?", treatmentID).Find(&areas).Error
+	if err != nil {
+		return resdto.AreasResponse{
+			IsSuccess: false,
+			Message:   "Failed to fetch areas",
+			Data:      nil,
+		}, err
+	}
+
+	// Convert to DTOs
+	var data []resdto.AreaDTO
+	for _, a := range areas {
+		data = append(data, resdto.AreaDTO{
+			ID:          a.ID,
+			Name:        a.Name,
+			Icon:        a.Icon,
+			Description: a.Description,
+			IsSideArea:  a.IsSideArea,
+		})
+	}
+
+	return resdto.AreasResponse{
+		IsSuccess: true,
+		Message:   "Areas retrieved successfully",
+		Data:      data,
+	}, nil
+}
+
+// GetSideAreas returns all side areas for a given treatment ID and area ID
+func GetSideAreas(treatmentID, areaID uint) (resdto.SideAreasResponse, error) {
+	db := config.DB
+
+	var sideAreas []models.SideArea
+
+	err := db.Where("treatment_id = ? AND area_id = ?", treatmentID, areaID).Find(&sideAreas).Error
+	if err != nil {
+		return resdto.SideAreasResponse{
+			IsSuccess: false,
+			Message:   "Failed to fetch side areas",
+			Data:      nil,
+		}, err
+	}
+
+	// Convert to DTOs
+	var data []resdto.SideAreaDTO
+	for _, sa := range sideAreas {
+		// Generate syringe options from min to max
+		var syringeOptions []int
+		for i := sa.MinSyringe; i <= sa.MaxSyringe; i++ {
+			syringeOptions = append(syringeOptions, i)
+		}
+
+		data = append(data, resdto.SideAreaDTO{
+			ID:             sa.ID,
+			Name:           sa.Name,
+			Icon:           sa.Icon,
+			Description:    sa.Description,
+			MinSyringe:     sa.MinSyringe,
+			MaxSyringe:     sa.MaxSyringe,
+			SyringeOptions: syringeOptions,
+		})
+	}
+
+	return resdto.SideAreasResponse{
+		IsSuccess: true,
+		Message:   "Side areas retrieved successfully",
 		Data:      data,
 	}, nil
 }

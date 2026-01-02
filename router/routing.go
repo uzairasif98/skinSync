@@ -26,6 +26,10 @@ func SetupRoutes(e *echo.Group) {
 		public.GET("/onboarding/masters", controllers.GetOnboardingMastersHandler)
 		// treatment masters (public)
 		public.GET("/treatments/masters", controllers.GetTreatmentMastersHandler)
+		// areas by treatment (public)
+		public.GET("/treatments/:id/areas", controllers.GetAreasHandler)
+		// side areas by treatment and area (public)
+		public.GET("/treatments/:treatmentId/areas/:areaId/sideareas", controllers.GetSideAreasHandler)
 	}
 
 	// Protected routes with authentication and logging
@@ -47,7 +51,6 @@ func SetupRoutes(e *echo.Group) {
 		api.PUT("/admin/onboarding/question/:id", controllers.AdminUpdateQuestionHandler)
 		api.DELETE("/admin/onboarding/question/:id", controllers.AdminDeleteQuestionHandler)
 		api.DELETE("/admin/onboarding/question/:qid/options/:optionId", controllers.AdminDeleteOptionHandler)
-
 	}
 
 }
