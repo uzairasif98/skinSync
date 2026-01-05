@@ -186,22 +186,25 @@ func VerifyOTP(req reqdto.VerifyOTPRequest) (*resdto.LoginResponse, error) {
 	// Find or create user
 	var user models.User
 	var provider models.AuthProvider
+	isFirstLogin := false
 
 	err := db.Where("provider = ? AND email = ?", "email", req.Email).First(&provider).Error
 	if err == nil {
-		// Provider exists, get user
+		// Provider exists, get user (returning user)
 		if err = db.First(&user, provider.UserID).Error; err != nil {
 			return nil, err
 		}
+		isFirstLogin = false
 	} else if errors.Is(err, gorm.ErrRecordNotFound) {
 		// Check if user exists by primary email
 		err = db.Where("primary_email = ?", req.Email).First(&user).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			// Create new user
+			// Create new user (first time signup)
 			user = models.User{PrimaryEmail: &req.Email, Status: "active"}
 			if err = db.Create(&user).Error; err != nil {
 				return nil, err
 			}
+			isFirstLogin = true
 		} else if err != nil {
 			return nil, err
 		}
@@ -251,6 +254,7 @@ func VerifyOTP(req reqdto.VerifyOTPRequest) (*resdto.LoginResponse, error) {
 	resp.Data.RefreshToken = raw
 	resp.Data.AccessExpiresAt = authToken.AccessExpiresAt.Unix()
 	resp.Data.RefreshExpiresAt = authToken.RefreshExpiresAt.Unix()
+	resp.Data.IsFirstLogin = isFirstLogin
 	resp.Data.User = user
 
 	return resp, nil

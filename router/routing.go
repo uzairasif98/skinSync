@@ -40,7 +40,7 @@ func SetupRoutes(e *echo.Group) {
 	{
 		api.POST("/auth/refresh", controllers.RefreshTokenHandler)
 		// onboarding protected endpoints
-		api.POST("/onboarding/answer", controllers.SaveOnboardingHandler)
+		api.PATCH("/onboarding/answer", controllers.SaveOnboardingHandler)
 		api.POST("/onboarding/profile", controllers.SaveProfileHandler)
 		api.GET("/onboarding/fetchprofile", controllers.GetUserProfileHandler)
 

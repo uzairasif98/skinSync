@@ -10,6 +10,7 @@ type LoginResponse struct {
 		RefreshToken     string      `json:"refresh_token"`
 		AccessExpiresAt  int64       `json:"access_expires_at"`
 		RefreshExpiresAt int64       `json:"refresh_expires_at"`
+		IsFirstLogin     bool        `json:"is_first_login"`
 		User             models.User `json:"user"`
 	} `json:"data"`
 }
