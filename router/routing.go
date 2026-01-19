@@ -17,40 +17,70 @@ func RequestHandler(e *echo.Echo) {
 
 func SetupRoutes(e *echo.Group) {
 	e.Static("/", os.Getenv("STATIC_DIR"))
+
+	// ========== PUBLIC ROUTES (No Auth) ==========
 	public := e.Group("")
 	{
+		// Customer login (OTP)
 		public.POST("/login", controllers.Login)
-		// OTP verification (after login sends OTP)
 		public.POST("/verify-otp", controllers.VerifyOTPHandler)
-		// public masters for frontend to render step UI
+
+		// Admin/Clinic login (Email + Password)
+		public.POST("/admin/login", controllers.AdminLoginHandler)
+		public.POST("/admin/register", controllers.AdminRegisterHandler)
+
+		// Public masters
 		public.GET("/onboarding/masters", controllers.GetOnboardingMastersHandler)
-		// treatment masters (public)
 		public.GET("/treatments/masters", controllers.GetTreatmentMastersHandler)
-		// areas by treatment (public)
 		public.GET("/treatments/:id/areas", controllers.GetAreasHandler)
-		// side areas by treatment and area (public)
 		public.GET("/treatments/:treatmentId/areas/:areaId/sideareas", controllers.GetSideAreasHandler)
 	}
 
-	// Protected routes with authentication and logging
-
-	// current user's saved onboarding selections (requires token)
-
-	api := e.Group("/v1", middlewares.AuthMiddleware)
+	// ========== CUSTOMER ROUTES (Customer Auth Required) ==========
+	customer := e.Group("/v1", middlewares.AuthMiddleware)
 	{
-		api.POST("/auth/refresh", controllers.RefreshTokenHandler)
-		// onboarding protected endpoints
-		api.PATCH("/onboarding/answer", controllers.SaveOnboardingHandler)
-		api.POST("/onboarding/profile", controllers.SaveProfileHandler)
-		api.GET("/onboarding/fetchprofile", controllers.GetUserProfileHandler)
+		customer.POST("/auth/refresh", controllers.RefreshTokenHandler)
 
-		api.GET("/onboarding/user", controllers.GetUserOnboardingHandler)
-		// admin endpoints for onboarding masters
-		api.POST("/admin/onboarding/question", controllers.AdminCreateQuestionHandler)
-		api.POST("/admin/onboarding/question/:id/options", controllers.AdminAddOptionsHandler)
-		api.PUT("/admin/onboarding/question/:id", controllers.AdminUpdateQuestionHandler)
-		api.DELETE("/admin/onboarding/question/:id", controllers.AdminDeleteQuestionHandler)
-		api.DELETE("/admin/onboarding/question/:qid/options/:optionId", controllers.AdminDeleteOptionHandler)
+		// Onboarding endpoints
+		customer.PATCH("/onboarding/answer", controllers.SaveOnboardingHandler)
+		customer.POST("/onboarding/profile", controllers.SaveProfileHandler)
+		customer.GET("/onboarding/fetchprofile", controllers.GetUserProfileHandler)
+		customer.GET("/onboarding/user", controllers.GetUserOnboardingHandler)
+	}
+
+	// ========== ADMIN ROUTES (Permission-Based) ==========
+	admin := e.Group("/admin", middlewares.AdminAuthMiddleware)
+	{
+		// Profile
+		admin.GET("/me", controllers.GetAdminMeHandler, middlewares.RequirePermission("profile.view"))
+
+		// Onboarding question management
+		admin.POST("/onboarding/question", controllers.AdminCreateQuestionHandler, middlewares.RequirePermission("onboarding.edit"))
+		admin.POST("/onboarding/question/:id/options", controllers.AdminAddOptionsHandler, middlewares.RequirePermission("onboarding.edit"))
+		admin.PUT("/onboarding/question/:id", controllers.AdminUpdateQuestionHandler, middlewares.RequirePermission("onboarding.edit"))
+		admin.DELETE("/onboarding/question/:id", controllers.AdminDeleteQuestionHandler, middlewares.RequirePermission("onboarding.delete"))
+		admin.DELETE("/onboarding/question/:qid/options/:optionId", controllers.AdminDeleteOptionHandler, middlewares.RequirePermission("onboarding.delete"))
+
+		// User management (future)
+		// admin.GET("/users", controllers.GetUsers, middlewares.RequirePermission("users.view"))
+		// admin.PUT("/users/:id", controllers.UpdateUser, middlewares.RequirePermission("users.edit"))
+		// admin.DELETE("/users/:id", controllers.DeleteUser, middlewares.RequirePermission("users.delete"))
+
+		// Clinic management (future)
+		// admin.GET("/clinics", controllers.GetClinics, middlewares.RequirePermission("clinics.view"))
+		// admin.POST("/clinics", controllers.CreateClinic, middlewares.RequirePermission("clinics.edit"))
+	}
+
+	// ========== CLINIC ROUTES (Permission-Based) ==========
+	clinic := e.Group("/clinic", middlewares.AdminAuthMiddleware)
+	{
+		// Profile
+		clinic.GET("/me", controllers.GetAdminMeHandler, middlewares.RequirePermission("profile.view"))
+
+		// Appointments (future - clinic staff can view and edit)
+		// clinic.GET("/appointments", controllers.GetAppointments, middlewares.RequirePermission("appointments.view"))
+		// clinic.POST("/appointments", controllers.CreateAppointment, middlewares.RequirePermission("appointments.edit"))
+		// clinic.PUT("/appointments/:id", controllers.UpdateAppointment, middlewares.RequirePermission("appointments.edit"))
 	}
 
 }

@@ -25,3 +25,12 @@ type UserRole struct {
 	UserID uint64 `gorm:"index"`
 	RoleID uint64 `gorm:"index"`
 }
+
+// AdminPermission allows per-admin permission overrides
+type AdminPermission struct {
+	AdminID      uint64     `gorm:"primaryKey;index"`
+	PermissionID uint64     `gorm:"primaryKey;index"`
+	Granted      bool       `gorm:"default:true"` // true = granted, false = explicitly denied
+	Admin        AdminUser  `gorm:"foreignKey:AdminID"`
+	Permission   Permission `gorm:"foreignKey:PermissionID"`
+}

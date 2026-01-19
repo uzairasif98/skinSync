@@ -34,7 +34,7 @@ type AreasResponse struct {
 
 // SideAreaDTO represents a single side area
 type SideAreaDTO struct {
-	ID             uint  `json:"id"`
+	ID             uint   `json:"id"`
 	Name           string `json:"name"`
 	Icon           string `json:"icon,omitempty"`
 	Description    string `json:"description,omitempty"`

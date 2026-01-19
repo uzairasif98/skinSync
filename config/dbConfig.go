@@ -69,6 +69,9 @@ func ConnectDB() {
 		&models.Permission{},
 		&models.RolePermission{},
 		&models.UserRole{},
+		// Admin/Clinic users
+		&models.AdminUser{},
+		&models.AdminPermission{},
 		// onboarding question/option/answer tables (single-step)
 		&models.SkinConditionQuestion{},
 		&models.SkinConditionQuestionOption{},
@@ -86,6 +89,7 @@ func ConnectDB() {
 		log.Fatalf("Failed to migrate database: %v", err)
 	}
 	SeedOnboardingData()
+	SeedRBACData()
 	log.Println("Database connection established")
 }
 
@@ -136,4 +140,151 @@ func SeedOnboardingData() {
 			db.Where("question_id = ? AND option_text = ?", qq.ID, opt).FirstOrCreate(&o, models.SkinConditionQuestionOption{QuestionID: qq.ID, OptionText: opt})
 		}
 	}
+}
+
+// SeedRBACData creates default roles and permissions (idempotent)
+func SeedRBACData() {
+	db := DB
+	if db == nil {
+		log.Println("DB not initialized, skipping RBAC seeding")
+		return
+	}
+
+	// Define permissions
+	permissions := []struct {
+		Name        string
+		Description string
+	}{
+		// User Management
+		{"users.view", "View customer users"},
+		{"users.edit", "Edit customer users"},
+		{"users.delete", "Delete customer users"},
+
+		// Clinic Management
+		{"clinics.view", "View clinics"},
+		{"clinics.edit", "Edit clinics"},
+		{"clinics.delete", "Delete clinics"},
+
+		// Treatment Management
+		{"treatments.view", "View treatments"},
+		{"treatments.edit", "Edit treatments"},
+		{"treatments.delete", "Delete treatments"},
+
+		// Onboarding Management
+		{"onboarding.view", "View onboarding questions"},
+		{"onboarding.edit", "Edit onboarding questions"},
+		{"onboarding.delete", "Delete onboarding questions"},
+
+		// Analytics
+		{"analytics.view", "View analytics and reports"},
+		{"analytics.export", "Export reports"},
+
+		// Admin Management
+		{"admins.view", "View admin users"},
+		{"admins.create", "Create admin users"},
+		{"admins.edit", "Edit admin users"},
+		{"admins.delete", "Delete admin users"},
+
+		// Appointment Management
+		{"appointments.view", "View appointments"},
+		{"appointments.edit", "Edit appointments"},
+		{"appointments.delete", "Delete appointments"},
+
+		// Profile
+		{"profile.view", "View own profile"},
+		{"profile.edit", "Edit own profile"},
+	}
+
+	// Create permissions (idempotent)
+	permMap := make(map[string]uint64)
+	for _, p := range permissions {
+		var perm models.Permission
+		desc := p.Description
+		db.Where("name = ?", p.Name).FirstOrCreate(&perm, models.Permission{
+			Name:        p.Name,
+			Description: &desc,
+		})
+		permMap[p.Name] = perm.ID
+	}
+
+	// Define roles with their permissions
+	roles := []struct {
+		Name        string
+		Description string
+		Permissions []string
+	}{
+		{
+			Name:        "super_admin",
+			Description: "Super administrator with all permissions",
+			Permissions: []string{
+				"users.view", "users.edit", "users.delete",
+				"clinics.view", "clinics.edit", "clinics.delete",
+				"treatments.view", "treatments.edit", "treatments.delete",
+				"onboarding.view", "onboarding.edit", "onboarding.delete",
+				"analytics.view", "analytics.export",
+				"admins.view", "admins.create", "admins.edit", "admins.delete",
+				"appointments.view", "appointments.edit", "appointments.delete",
+				"profile.view", "profile.edit",
+			},
+		},
+		{
+			Name:        "admin",
+			Description: "Administrator with most permissions",
+			Permissions: []string{
+				"users.view", "users.edit",
+				"clinics.view", "clinics.edit",
+				"treatments.view", "treatments.edit",
+				"onboarding.view", // view only, no edit/delete
+				"analytics.view",
+				"admins.view",
+				"appointments.view", "appointments.edit",
+				"profile.view", "profile.edit",
+			},
+		},
+		{
+			Name:        "clinic_manager",
+			Description: "Clinic manager with clinic-related permissions",
+			Permissions: []string{
+				"appointments.view", "appointments.edit", "appointments.delete",
+				"treatments.view",
+				"users.view",
+				"analytics.view",
+				"profile.view", "profile.edit",
+			},
+		},
+		{
+			Name:        "clinic_staff",
+			Description: "Clinic staff with limited permissions",
+			Permissions: []string{
+				"appointments.view", "appointments.edit",
+				"treatments.view",
+				"profile.view", "profile.edit",
+			},
+		},
+	}
+
+	// Create roles and assign permissions (idempotent)
+	for _, r := range roles {
+		var role models.Role
+		desc := r.Description
+		db.Where("name = ?", r.Name).FirstOrCreate(&role, models.Role{
+			Name:        r.Name,
+			Description: &desc,
+		})
+
+		// Remove existing role permissions
+		db.Where("role_id = ?", role.ID).Delete(&models.RolePermission{})
+
+		// Add permissions to role
+		for _, permName := range r.Permissions {
+			if permID, ok := permMap[permName]; ok {
+				db.Create(&models.RolePermission{
+					RoleID:       role.ID,
+					PermissionID: permID,
+				})
+			}
+		}
+	}
+
+	log.Println("RBAC data seeded successfully")
 }
