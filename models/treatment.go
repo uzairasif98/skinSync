@@ -28,6 +28,8 @@ type Area struct {
 	Icon        string     `gorm:"size:255" json:"icon,omitempty"`
 	Description string     `gorm:"type:text" json:"description,omitempty"`
 	IsSideArea  bool       `gorm:"default:false" json:"is_sidearea"`
+	MinSyringe  int        `gorm:"default:1" json:"min_syringe"`
+	MaxSyringe  int        `gorm:"default:1" json:"max_syringe"`
 	CreatedAt   time.Time  `json:"created_at"`
 	UpdatedAt   time.Time  `json:"updated_at"`
 	Treatment   Treatment  `gorm:"foreignKey:TreatmentID;constraint:OnDelete:CASCADE" json:"-"`

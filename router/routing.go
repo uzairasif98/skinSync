@@ -25,9 +25,8 @@ func SetupRoutes(e *echo.Group) {
 		public.POST("/login", controllers.Login)
 		public.POST("/verify-otp", controllers.VerifyOTPHandler)
 
-		// Admin/Clinic login (Email + Password)
+		// Admin/Clinic login (Email + Password) - Login is public, Register requires super_admin
 		public.POST("/admin/login", controllers.AdminLoginHandler)
-		public.POST("/admin/register", controllers.AdminRegisterHandler)
 
 		// Public masters
 		public.GET("/onboarding/masters", controllers.GetOnboardingMastersHandler)
@@ -53,6 +52,10 @@ func SetupRoutes(e *echo.Group) {
 	{
 		// Profile
 		admin.GET("/me", controllers.GetAdminMeHandler, middlewares.RequirePermission("profile.view"))
+
+		// Admin user management (super_admin only)
+		admin.POST("/register", controllers.AdminRegisterHandler, middlewares.RequirePermission("admins.create"))
+		admin.POST("/verify-password", controllers.VerifyPasswordHandler, middlewares.RequirePermission("admins.create"))
 
 		// Onboarding question management
 		admin.POST("/onboarding/question", controllers.AdminCreateQuestionHandler, middlewares.RequirePermission("onboarding.edit"))

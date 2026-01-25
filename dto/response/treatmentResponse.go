@@ -18,11 +18,14 @@ type TreatmentMastersResponse struct {
 
 // AreaDTO represents a single area
 type AreaDTO struct {
-	ID          uint   `json:"id"`
-	Name        string `json:"name"`
-	Icon        string `json:"icon,omitempty"`
-	Description string `json:"description,omitempty"`
-	IsSideArea  bool   `json:"is_sidearea"`
+	ID             uint   `json:"id"`
+	Name           string `json:"name"`
+	Icon           string `json:"icon,omitempty"`
+	Description    string `json:"description,omitempty"`
+	IsSideArea     bool   `json:"is_sidearea"`
+	MinSyringe     int    `json:"min_syringe,omitempty"`
+	MaxSyringe     int    `json:"max_syringe,omitempty"`
+	SyringeOptions []int  `json:"syringe_options,omitempty"`
 }
 
 // AreasResponse for GET /api/treatments/:id/areas

@@ -92,3 +92,32 @@ func GetAdminMeHandler(c echo.Context) error {
 		Data: *adminUser,
 	})
 }
+
+// VerifyPasswordHandler checks if a password matches a bcrypt hash (super_admin utility)
+func VerifyPasswordHandler(c echo.Context) error {
+	var req reqdto.VerifyPasswordRequest
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, resdto.BaseResponse{
+			IsSuccess: false,
+			Message:   err.Error(),
+		})
+	}
+
+	if req.Password == "" || req.Hash == "" {
+		return c.JSON(http.StatusBadRequest, resdto.BaseResponse{
+			IsSuccess: false,
+			Message:   "password and hash are required",
+		})
+	}
+
+	isMatch := services.CheckPasswordHash(req.Password, req.Hash)
+
+	return c.JSON(http.StatusOK, resdto.BaseResponse{
+		IsSuccess: true,
+		Message:   "",
+		Data: map[string]interface{}{
+			"match":    isMatch,
+			"password": req.Password,
+		},
+	})
+}

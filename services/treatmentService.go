@@ -58,13 +58,27 @@ func GetAreasByTreatment(treatmentID uint) (resdto.AreasResponse, error) {
 	// Convert to DTOs
 	var data []resdto.AreaDTO
 	for _, a := range areas {
-		data = append(data, resdto.AreaDTO{
+		areaDTO := resdto.AreaDTO{
 			ID:          a.ID,
 			Name:        a.Name,
 			Icon:        a.Icon,
 			Description: a.Description,
 			IsSideArea:  a.IsSideArea,
-		})
+		}
+
+		// If area has no side_areas (IsSideArea = false), include syringe options directly
+		if !a.IsSideArea {
+			areaDTO.MinSyringe = a.MinSyringe
+			areaDTO.MaxSyringe = a.MaxSyringe
+			// Generate syringe options from min to max
+			var syringeOptions []int
+			for i := a.MinSyringe; i <= a.MaxSyringe; i++ {
+				syringeOptions = append(syringeOptions, i)
+			}
+			areaDTO.SyringeOptions = syringeOptions
+		}
+
+		data = append(data, areaDTO)
 	}
 
 	return resdto.AreasResponse{

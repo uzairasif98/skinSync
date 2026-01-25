@@ -13,3 +13,9 @@ type AdminRegisterRequest struct {
 	Name     string `json:"name" validate:"required,min=2"`
 	RoleName string `json:"role_name" validate:"required"` // super_admin, admin, clinic_manager, clinic_staff
 }
+
+// VerifyPasswordRequest represents password verification utility request
+type VerifyPasswordRequest struct {
+	Password string `json:"password" validate:"required"`
+	Hash     string `json:"hash" validate:"required"`
+}
