@@ -69,9 +69,8 @@ func SetupRoutes(e *echo.Group) {
 		// admin.PUT("/users/:id", controllers.UpdateUser, middlewares.RequirePermission("users.edit"))
 		// admin.DELETE("/users/:id", controllers.DeleteUser, middlewares.RequirePermission("users.delete"))
 
-		// Clinic management (future)
-		// admin.GET("/clinics", controllers.GetClinics, middlewares.RequirePermission("clinics.view"))
-		// admin.POST("/clinics", controllers.CreateClinic, middlewares.RequirePermission("clinics.edit"))
+		// Clinic management (super_admin only)
+		admin.POST("/clinic/register", controllers.RegisterClinicHandler, middlewares.RequirePermission("clinics.create"))
 	}
 
 	// ========== CLINIC ROUTES (Permission-Based) ==========

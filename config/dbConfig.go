@@ -81,6 +81,9 @@ func ConnectDB() {
 		&models.Treatment{},
 		&models.Area{},
 		&models.SideArea{},
+		// clinic tables
+		&models.Clinic{},
+		&models.ClinicUser{},
 	); err != nil {
 		// attempt to close DB on migration error
 		if cerr := CloseDB(); cerr != nil {
@@ -162,6 +165,7 @@ func SeedRBACData() {
 
 		// Clinic Management
 		{"clinics.view", "View clinics"},
+		{"clinics.create", "Create/Register clinics"},
 		{"clinics.edit", "Edit clinics"},
 		{"clinics.delete", "Delete clinics"},
 
@@ -218,7 +222,7 @@ func SeedRBACData() {
 			Description: "Super administrator with all permissions",
 			Permissions: []string{
 				"users.view", "users.edit", "users.delete",
-				"clinics.view", "clinics.edit", "clinics.delete",
+				"clinics.view", "clinics.create", "clinics.edit", "clinics.delete",
 				"treatments.view", "treatments.edit", "treatments.delete",
 				"onboarding.view", "onboarding.edit", "onboarding.delete",
 				"analytics.view", "analytics.export",

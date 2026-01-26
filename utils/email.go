@@ -49,3 +49,54 @@ SkinSync Team
 
 	return nil
 }
+
+// SendClinicCredentialsEmail sends login credentials to clinic owner
+func SendClinicCredentialsEmail(toEmail, ownerName, clinicName, password string) error {
+	smtpHost := os.Getenv("SMTP_HOST")
+	smtpPort := os.Getenv("SMTP_PORT")
+	smtpUser := os.Getenv("SMTP_USER")
+	smtpPassword := os.Getenv("SMTP_PASSWORD")
+	fromEmail := os.Getenv("SMTP_FROM")
+
+	if smtpHost == "" || smtpPort == "" || smtpUser == "" || smtpPassword == "" {
+		return fmt.Errorf("SMTP configuration missing")
+	}
+
+	if fromEmail == "" {
+		fromEmail = smtpUser
+	}
+
+	subject := "Welcome to SkinSync - Your Clinic Login Credentials"
+	body := fmt.Sprintf(`
+Hello %s,
+
+Your clinic "%s" has been successfully registered on SkinSync!
+
+Here are your login credentials:
+
+Email: %s
+Password: %s
+
+Login URL: https://clinic.skinsync.com/login
+
+Please change your password after your first login for security purposes.
+
+If you did not request this registration, please contact our support team immediately.
+
+Thanks,
+SkinSync Team
+`, ownerName, clinicName, toEmail, password)
+
+	message := fmt.Sprintf("From: %s\r\nTo: %s\r\nSubject: %s\r\n\r\n%s",
+		fromEmail, toEmail, subject, body)
+
+	auth := smtp.PlainAuth("", smtpUser, smtpPassword, smtpHost)
+
+	addr := fmt.Sprintf("%s:%s", smtpHost, smtpPort)
+	err := smtp.SendMail(addr, auth, fromEmail, []string{toEmail}, []byte(message))
+	if err != nil {
+		return fmt.Errorf("failed to send email: %w", err)
+	}
+
+	return nil
+}
