@@ -38,6 +38,18 @@ func GenerateJWT(email string, user_id uint, deviceID string) (string, error) {
 	return token.SignedString(jwtSecret)
 }
 
+// GenerateClinicJWT generates JWT token for clinic users with clinic context
+func GenerateClinicJWT(email string, clinicUserID uint64, clinicID uint64, role string) (string, error) {
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"email":          email,
+		"clinic_user_id": clinicUserID,
+		"clinic_id":      clinicID,
+		"role":           role,
+		"exp":            time.Now().Add(accessTokenDuration).Unix(),
+	})
+	return token.SignedString(jwtSecret)
+}
+
 // GenerateRefreshToken returns a cryptographically secure random token and
 // the same token hashed using bcrypt.
 func GenerateRefreshToken() (rawToken string, hashedToken string, err error) {

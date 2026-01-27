@@ -32,7 +32,23 @@ type ClinicUserDTO struct {
 	ID       uint64 `json:"id"`
 	ClinicID uint64 `json:"clinic_id"`
 	Email    string `json:"email"`
-	Name     string `json:"name"`
-	Role     string `json:"role"`
-	Status   string `json:"status"`
+	Name     string     `json:"name"`
+	Role     string     `json:"role"`
+	Status   string     `json:"status"`
+	Clinic   *ClinicDTO `json:"clinic,omitempty"`
+}
+
+// ClinicLoginResponse represents clinic login response
+type ClinicLoginResponse struct {
+	BaseResponse
+	Data ClinicLoginData `json:"data"`
+}
+
+// ClinicLoginData contains login tokens and user info
+type ClinicLoginData struct {
+	AccessToken      string         `json:"access_token"`
+	RefreshToken     string         `json:"refresh_token"`
+	AccessExpiresAt  int64          `json:"access_expires_at"`
+	RefreshExpiresAt int64          `json:"refresh_expires_at"`
+	ClinicUser       ClinicUserDTO  `json:"clinic_user"`
 }

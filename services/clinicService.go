@@ -2,12 +2,15 @@ package services
 
 import (
 	"errors"
+	"time"
 
 	"skinSync/config"
 	reqdto "skinSync/dto/request"
 	resdto "skinSync/dto/response"
 	"skinSync/models"
 	"skinSync/utils"
+
+	"gorm.io/gorm"
 )
 
 // RegisterClinic creates a new clinic and its owner (super_admin only)
@@ -119,4 +122,80 @@ func RegisterClinic(req reqdto.RegisterClinicRequest) (resdto.RegisterClinicResp
 			Status:        clinic.Status,
 		},
 	}, nil
+}
+
+// ClinicLogin authenticates clinic user and returns JWT tokens
+func ClinicLogin(req reqdto.ClinicLoginRequest) (*resdto.ClinicLoginResponse, error) {
+	db := config.DB
+	if db == nil {
+		return nil, errors.New("database not initialized")
+	}
+
+	// Find clinic user by email with clinic relation
+	var clinicUser models.ClinicUser
+	if err := db.Preload("Clinic").Where("email = ?", req.Email).First(&clinicUser).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, errors.New("invalid email or password")
+		}
+		return nil, err
+	}
+
+	// Check if user is active
+	if clinicUser.Status != "active" {
+		return nil, errors.New("account is inactive")
+	}
+
+	// Check if clinic is active
+	if clinicUser.Clinic.Status != "active" {
+		return nil, errors.New("clinic is inactive or suspended")
+	}
+
+	// Verify password
+	if !CheckPasswordHash(req.Password, clinicUser.PasswordHash) {
+		return nil, errors.New("invalid email or password")
+	}
+
+	// Update last login
+	now := time.Now()
+	clinicUser.LastLogin = &now
+	db.Save(&clinicUser)
+
+	// Generate tokens (include clinic_id and role in JWT)
+	accessToken, err := GenerateClinicJWT(clinicUser.Email, clinicUser.ID, clinicUser.ClinicID, clinicUser.Role)
+	if err != nil {
+		return nil, err
+	}
+
+	refreshToken, _, err := GenerateRefreshToken()
+	if err != nil {
+		return nil, err
+	}
+
+	// Prepare response
+	resp := &resdto.ClinicLoginResponse{}
+	resp.IsSuccess = true
+	resp.Message = "login successful"
+	resp.Data.AccessToken = accessToken
+	resp.Data.RefreshToken = refreshToken
+	resp.Data.AccessExpiresAt = time.Now().Add(accessTokenDuration).Unix()
+	resp.Data.RefreshExpiresAt = time.Now().Add(refreshTokenDuration).Unix()
+	resp.Data.ClinicUser = resdto.ClinicUserDTO{
+		ID:       clinicUser.ID,
+		ClinicID: clinicUser.ClinicID,
+		Email:    clinicUser.Email,
+		Name:     clinicUser.Name,
+		Role:     clinicUser.Role,
+		Status:   clinicUser.Status,
+		Clinic: &resdto.ClinicDTO{
+			ID:      clinicUser.Clinic.ID,
+			Name:    clinicUser.Clinic.Name,
+			Email:   clinicUser.Clinic.Email,
+			Phone:   clinicUser.Clinic.Phone,
+			Address: clinicUser.Clinic.Address,
+			Logo:    clinicUser.Clinic.Logo,
+			Status:  clinicUser.Clinic.Status,
+		},
+	}
+
+	return resp, nil
 }

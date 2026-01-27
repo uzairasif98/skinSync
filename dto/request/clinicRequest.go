@@ -13,3 +13,9 @@ type RegisterClinicRequest struct {
 	OwnerName  string `json:"owner_name" validate:"required,min=2"`
 	OwnerEmail string `json:"owner_email" validate:"required,email"`
 }
+
+// ClinicLoginRequest represents clinic user login request
+type ClinicLoginRequest struct {
+	Email    string `json:"email" validate:"required,email"`
+	Password string `json:"password" validate:"required,min=6"`
+}

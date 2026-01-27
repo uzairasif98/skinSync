@@ -35,3 +35,32 @@ func RegisterClinicHandler(c echo.Context) error {
 
 	return c.JSON(http.StatusCreated, resp)
 }
+
+// ClinicLoginHandler handles clinic user login
+func ClinicLoginHandler(c echo.Context) error {
+	var req reqdto.ClinicLoginRequest
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, resdto.BaseResponse{
+			IsSuccess: false,
+			Message:   err.Error(),
+		})
+	}
+
+	// Validate required fields
+	if req.Email == "" || req.Password == "" {
+		return c.JSON(http.StatusBadRequest, resdto.BaseResponse{
+			IsSuccess: false,
+			Message:   "email and password are required",
+		})
+	}
+
+	resp, err := services.ClinicLogin(req)
+	if err != nil {
+		return c.JSON(http.StatusUnauthorized, resdto.BaseResponse{
+			IsSuccess: false,
+			Message:   err.Error(),
+		})
+	}
+
+	return c.JSON(http.StatusOK, resp)
+}

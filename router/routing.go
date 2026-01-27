@@ -25,8 +25,11 @@ func SetupRoutes(e *echo.Group) {
 		public.POST("/login", controllers.Login)
 		public.POST("/verify-otp", controllers.VerifyOTPHandler)
 
-		// Admin/Clinic login (Email + Password) - Login is public, Register requires super_admin
+		// Admin login (Email + Password) - Login is public, Register requires super_admin
 		public.POST("/admin/login", controllers.AdminLoginHandler)
+
+		// Clinic login (Email + Password) - Login is public, Register by super_admin
+		public.POST("/clinic/login", controllers.ClinicLoginHandler)
 
 		// Public masters
 		public.GET("/onboarding/masters", controllers.GetOnboardingMastersHandler)
@@ -73,16 +76,21 @@ func SetupRoutes(e *echo.Group) {
 		admin.POST("/clinic/register", controllers.RegisterClinicHandler, middlewares.RequirePermission("clinics.create"))
 	}
 
-	// ========== CLINIC ROUTES (Permission-Based) ==========
-	clinic := e.Group("/clinic", middlewares.AdminAuthMiddleware)
-	{
-		// Profile
-		clinic.GET("/me", controllers.GetAdminMeHandler, middlewares.RequirePermission("profile.view"))
-
-		// Appointments (future - clinic staff can view and edit)
-		// clinic.GET("/appointments", controllers.GetAppointments, middlewares.RequirePermission("appointments.view"))
-		// clinic.POST("/appointments", controllers.CreateAppointment, middlewares.RequirePermission("appointments.edit"))
-		// clinic.PUT("/appointments/:id", controllers.UpdateAppointment, middlewares.RequirePermission("appointments.edit"))
-	}
+	// ========== CLINIC ROUTES (Clinic Auth Required) ==========
+	// TODO: Uncomment when clinic endpoints are implemented
+	// clinic := e.Group("/clinic", middlewares.ClinicAuthMiddleware)
+	// {
+	// 	// Profile
+	// 	clinic.GET("/profile/me", controllers.GetClinicUserProfileHandler)
+	//
+	// 	// Appointments
+	// 	clinic.GET("/appointments", controllers.GetClinicAppointments)
+	// 	clinic.POST("/appointments", controllers.CreateClinicAppointment)
+	// 	clinic.PUT("/appointments/:id", controllers.UpdateClinicAppointment)
+	//
+	// 	// Patient Management
+	// 	clinic.GET("/patients", controllers.GetClinicPatients)
+	// 	clinic.POST("/patients", controllers.AddClinicPatient)
+	// }
 
 }
