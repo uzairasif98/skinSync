@@ -31,11 +31,17 @@ func SetupRoutes(e *echo.Group) {
 		// Clinic login (Email + Password) - Login is public, Register by super_admin
 		public.POST("/clinic/login", controllers.ClinicLoginHandler)
 
-		// Public masters
+		// Public masters (onboarding only - no auth needed for initial app load)
 		public.GET("/onboarding/masters", controllers.GetOnboardingMastersHandler)
-		public.GET("/treatments/masters", controllers.GetTreatmentMastersHandler)
-		public.GET("/treatments/:id/areas", controllers.GetAreasHandler)
-		public.GET("/treatments/:treatmentId/areas/:areaId/sideareas", controllers.GetSideAreasHandler)
+	}
+
+	// ========== UNIFIED AUTH ROUTES (Any valid token: customer/admin/clinic) ==========
+	unified := e.Group("", middlewares.UnifiedAuthMiddleware)
+	{
+		// Treatment viewing (any authenticated user)
+		unified.GET("/treatments/masters", controllers.GetTreatmentMastersHandler)
+		unified.GET("/treatments/:id/areas", controllers.GetAreasHandler)
+		unified.GET("/treatments/:treatmentId/areas/:areaId/sideareas", controllers.GetSideAreasHandler)
 	}
 
 	// ========== CUSTOMER ROUTES (Customer Auth Required) ==========
@@ -74,23 +80,24 @@ func SetupRoutes(e *echo.Group) {
 
 		// Clinic management (super_admin only)
 		admin.POST("/clinic/register", controllers.RegisterClinicHandler, middlewares.RequirePermission("clinics.create"))
+
+		// Treatment CRUD (super_admin only)
+		// TODO: Implement treatment CRUD controllers
+		// admin.POST("/treatments", controllers.CreateTreatmentHandler, middlewares.RequirePermission("treatments.edit"))
+		// admin.PUT("/treatments/:id", controllers.UpdateTreatmentHandler, middlewares.RequirePermission("treatments.edit"))
+		// admin.DELETE("/treatments/:id", controllers.DeleteTreatmentHandler, middlewares.RequirePermission("treatments.delete"))
 	}
 
 	// ========== CLINIC ROUTES (Clinic Auth Required) ==========
-	// TODO: Uncomment when clinic endpoints are implemented
 	// clinic := e.Group("/clinic", middlewares.ClinicAuthMiddleware)
 	// {
-	// 	// Profile
-	// 	clinic.GET("/profile/me", controllers.GetClinicUserProfileHandler)
-	//
-	// 	// Appointments
-	// 	clinic.GET("/appointments", controllers.GetClinicAppointments)
-	// 	clinic.POST("/appointments", controllers.CreateClinicAppointment)
-	// 	clinic.PUT("/appointments/:id", controllers.UpdateClinicAppointment)
-	//
-	// 	// Patient Management
-	// 	clinic.GET("/patients", controllers.GetClinicPatients)
-	// 	clinic.POST("/patients", controllers.AddClinicPatient)
+	// 	// TODO: Uncomment when clinic endpoints are implemented
+	// 	// clinic.GET("/profile/me", controllers.GetClinicUserProfileHandler)
+	// 	// clinic.GET("/appointments", controllers.GetClinicAppointments)
+	// 	// clinic.POST("/appointments", controllers.CreateClinicAppointment)
+	// 	// clinic.PUT("/appointments/:id", controllers.UpdateClinicAppointment)
+	// 	// clinic.GET("/patients", controllers.GetClinicPatients)
+	// 	// clinic.POST("/patients", controllers.AddClinicPatient)
 	// }
 
 }

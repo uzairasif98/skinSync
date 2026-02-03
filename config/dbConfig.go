@@ -245,26 +245,6 @@ func SeedRBACData() {
 				"profile.view", "profile.edit",
 			},
 		},
-		{
-			Name:        "clinic_manager",
-			Description: "Clinic manager with clinic-related permissions",
-			Permissions: []string{
-				"appointments.view", "appointments.edit", "appointments.delete",
-				"treatments.view",
-				"users.view",
-				"analytics.view",
-				"profile.view", "profile.edit",
-			},
-		},
-		{
-			Name:        "clinic_staff",
-			Description: "Clinic staff with limited permissions",
-			Permissions: []string{
-				"appointments.view", "appointments.edit",
-				"treatments.view",
-				"profile.view", "profile.edit",
-			},
-		},
 	}
 
 	// Create roles and assign permissions (idempotent)
