@@ -9,7 +9,7 @@ on:
 env:
   GO_VERSION: '1.24.1'
   APP_NAME: skinsync-api
-  DEPLOY_PATH: /opt/skinsync
+  DEPLOY_PATH: /home/ec2-user/skinsync/skinSync-main
 
 jobs:
   # ──────────────────────────────────────────────
