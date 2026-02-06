@@ -1,0 +1,109 @@
+name: SkinSync CI/CD Pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  GO_VERSION: '1.24.1'
+  APP_NAME: skinsync-api
+  DEPLOY_PATH: /opt/skinsync
+
+jobs:
+  # ──────────────────────────────────────────────
+  # Job 1: Build & Test
+  # ──────────────────────────────────────────────
+  build-and-test:
+    name: Build & Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Run vet
+        run: go vet ./...
+
+      - name: Run tests
+        run: go test -v -race -coverprofile=coverage.out ./...
+
+      - name: Build binary
+        run: go build -o ${{ env.APP_NAME }} main.go
+
+  # ──────────────────────────────────────────────
+  # Job 2: Deploy to EC2 (only on push to main)
+  # ──────────────────────────────────────────────
+  deploy:
+    name: Deploy to EC2
+    runs-on: ubuntu-latest
+    needs: build-and-test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Build production binary
+        env:
+          GOOS: linux
+          GOARCH: amd64
+        run: go build -ldflags="-s -w" -o ${{ env.APP_NAME }} main.go
+
+      - name: Copy binary to EC2
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          source: ${{ env.APP_NAME }}
+          target: /tmp/
+
+      - name: Deploy on EC2
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            # Stop the running service
+            sudo systemctl stop skinsync
+
+            # Backup current binary
+            if [ -f ${{ env.DEPLOY_PATH }}/${{ env.APP_NAME }} ]; then
+              sudo cp ${{ env.DEPLOY_PATH }}/${{ env.APP_NAME }} ${{ env.DEPLOY_PATH }}/${{ env.APP_NAME }}.backup
+            fi
+
+            # Move new binary into place
+            sudo mv /tmp/${{ env.APP_NAME }} ${{ env.DEPLOY_PATH }}/${{ env.APP_NAME }}
+            sudo chown skinsync:skinsync ${{ env.DEPLOY_PATH }}/${{ env.APP_NAME }}
+            sudo chmod +x ${{ env.DEPLOY_PATH }}/${{ env.APP_NAME }}
+
+            # Start the service
+            sudo systemctl start skinsync
+
+            # Verify it's running
+            sleep 3
+            if sudo systemctl is-active --quiet skinsync; then
+              echo "✅ Deployment successful — skinsync is running"
+            else
+              echo "❌ Deployment failed — rolling back"
+              sudo cp ${{ env.DEPLOY_PATH }}/${{ env.APP_NAME }}.backup ${{ env.DEPLOY_PATH }}/${{ env.APP_NAME }}
+              sudo chown skinsync:skinsync ${{ env.DEPLOY_PATH }}/${{ env.APP_NAME }}
+              sudo systemctl start skinsync
+              exit 1
+            fi
