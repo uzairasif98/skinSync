@@ -116,6 +116,97 @@ func ClearAllPermissionCache() {
 	})
 }
 
+// ==================== CLINIC PERMISSIONS ====================
+
+// Clinic permission cache (separate from admin)
+var clinicPermissionCache = sync.Map{}
+
+// HasClinicPermission checks if clinic user has a specific permission (with caching)
+func HasClinicPermission(clinicUserID uint64, permissionName string) (bool, error) {
+	permissions, err := GetClinicUserPermissionNames(clinicUserID)
+	if err != nil {
+		return false, err
+	}
+
+	for _, perm := range permissions {
+		if perm == permissionName {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// GetClinicUserPermissionNames returns all permission names for a clinic user (with caching)
+func GetClinicUserPermissionNames(clinicUserID uint64) ([]string, error) {
+	// Check cache first
+	cacheKey := clinicUserID
+	if cached, ok := clinicPermissionCache.Load(cacheKey); ok {
+		cachedPerms := cached.(CachedPermissions)
+		if time.Now().Before(cachedPerms.ExpiresAt) {
+			return cachedPerms.Permissions, nil
+		}
+		// Cache expired, remove it
+		clinicPermissionCache.Delete(cacheKey)
+	}
+
+	// Fetch from database
+	permissions, err := fetchClinicUserPermissionsFromDB(clinicUserID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Cache the result
+	clinicPermissionCache.Store(cacheKey, CachedPermissions{
+		Permissions: permissions,
+		ExpiresAt:   time.Now().Add(CacheExpiry),
+	})
+
+	return permissions, nil
+}
+
+// fetchClinicUserPermissionsFromDB fetches clinic user permissions from database
+func fetchClinicUserPermissionsFromDB(clinicUserID uint64) ([]string, error) {
+	db := config.DB
+	if db == nil {
+		return nil, nil
+	}
+
+	// Get clinic user with role
+	var clinicUser models.ClinicUser
+	if err := db.Preload("Role").First(&clinicUser, clinicUserID).Error; err != nil {
+		return nil, err
+	}
+
+	// Get role permissions
+	var rolePerms []models.ClinicRolePermission
+	if err := db.Preload("Permission").Where("role_id = ?", clinicUser.RoleID).Find(&rolePerms).Error; err != nil {
+		return nil, err
+	}
+
+	// Convert to permission names
+	permissions := make([]string, 0, len(rolePerms))
+	for _, rp := range rolePerms {
+		permissions = append(permissions, rp.Permission.Name)
+	}
+
+	return permissions, nil
+}
+
+// InvalidateClinicPermissionCache removes a specific clinic user's cache
+func InvalidateClinicPermissionCache(clinicUserID uint64) {
+	clinicPermissionCache.Delete(clinicUserID)
+}
+
+// ClearAllClinicPermissionCache clears the entire clinic permission cache
+func ClearAllClinicPermissionCache() {
+	clinicPermissionCache.Range(func(key, value interface{}) bool {
+		clinicPermissionCache.Delete(key)
+		return true
+	})
+}
+
+// ==================== ADMIN PERMISSIONS (GROUPED) ====================
+
 // GetAdminPermissionsGrouped returns permissions grouped by category
 func GetAdminPermissionsGrouped(adminID uint64) (map[string][]models.Permission, error) {
 	db := config.DB

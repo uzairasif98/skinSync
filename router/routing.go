@@ -42,6 +42,16 @@ func SetupRoutes(e *echo.Group) {
 		unified.GET("/treatments/masters", controllers.GetTreatmentMastersHandler)
 		unified.GET("/treatments/:id/areas", controllers.GetAreasHandler)
 		unified.GET("/treatments/:treatmentId/areas/:areaId/sideareas", controllers.GetSideAreasHandler)
+
+		// Discovery APIs (Clinic ↔ Treatment ↔ Doctor)
+		unified.GET("/clinics", controllers.GetAllClinicsHandler)
+		unified.GET("/doctors", controllers.GetAllDoctorsHandler)
+		unified.GET("/clinics/:clinicId/treatments", controllers.GetTreatmentsByClinicHandler)
+		unified.GET("/treatments/:treatmentId/clinics", controllers.GetClinicsByTreatmentHandler)
+		unified.GET("/doctors/:doctorId/treatments", controllers.GetTreatmentsByDoctorHandler)
+		unified.GET("/clinics/:clinicId/treatments/:treatmentId/doctors", controllers.GetDoctorsByClinicAndTreatmentHandler)
+		unified.GET("/doctors/:doctorId/clinics/:clinicId/treatments", controllers.GetTreatmentsByDoctorAndClinicHandler)
+		unified.GET("/doctors/:doctorId/treatments/:treatmentId/clinics", controllers.GetClinicsByDoctorAndTreatmentHandler)
 	}
 
 	// ========== CUSTOMER ROUTES (Customer Auth Required) ==========
@@ -89,15 +99,16 @@ func SetupRoutes(e *echo.Group) {
 	}
 
 	// ========== CLINIC ROUTES (Clinic Auth Required) ==========
-	// clinic := e.Group("/clinic", middlewares.ClinicAuthMiddleware)
-	// {
-	// 	// TODO: Uncomment when clinic endpoints are implemented
-	// 	// clinic.GET("/profile/me", controllers.GetClinicUserProfileHandler)
-	// 	// clinic.GET("/appointments", controllers.GetClinicAppointments)
-	// 	// clinic.POST("/appointments", controllers.CreateClinicAppointment)
-	// 	// clinic.PUT("/appointments/:id", controllers.UpdateClinicAppointment)
-	// 	// clinic.GET("/patients", controllers.GetClinicPatients)
-	// 	// clinic.POST("/patients", controllers.AddClinicPatient)
-	// }
+	clinic := e.Group("/clinic", middlewares.ClinicAuthMiddleware)
+	{
+		// Staff management (owner only)
+		clinic.POST("/users/register", controllers.RegisterClinicUserHandler, middlewares.RequireClinicPermission("staff.create"))
+
+		// TODO: Add more clinic endpoints
+		// clinic.GET("/profile/me", controllers.GetClinicUserProfileHandler, middlewares.RequireClinicPermission("profile.view"))
+		// clinic.GET("/users", controllers.GetClinicUsersHandler, middlewares.RequireClinicPermission("staff.view"))
+		// clinic.PUT("/users/:id", controllers.UpdateClinicUserHandler, middlewares.RequireClinicPermission("staff.edit"))
+		// clinic.DELETE("/users/:id", controllers.DeleteClinicUserHandler, middlewares.RequireClinicPermission("staff.delete"))
+	}
 
 }

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	resdto "skinSync/dto/response"
+	"skinSync/permissions"
 
 	"github.com/dgrijalva/jwt-go"
 	"github.com/labstack/echo/v4"
@@ -100,5 +101,41 @@ func ClinicAuthMiddleware(next echo.HandlerFunc) echo.HandlerFunc {
 		c.Set("role", role)
 
 		return next(c)
+	}
+}
+
+// RequireClinicPermission middleware checks if clinic user has specific permission
+func RequireClinicPermission(permission string) echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			// Get clinic_user_id from context (set by ClinicAuthMiddleware)
+			clinicUserIDFloat, ok := c.Get("clinic_user_id").(float64)
+			if !ok {
+				return c.JSON(http.StatusUnauthorized, resdto.BaseResponse{
+					IsSuccess: false,
+					Message:   "clinic_user_id not found in context",
+				})
+			}
+
+			clinicUserID := uint64(clinicUserIDFloat)
+
+			// Check permission
+			hasPermission, err := permissions.HasClinicPermission(clinicUserID, permission)
+			if err != nil {
+				return c.JSON(http.StatusInternalServerError, resdto.BaseResponse{
+					IsSuccess: false,
+					Message:   "error checking permissions",
+				})
+			}
+
+			if !hasPermission {
+				return c.JSON(http.StatusForbidden, resdto.BaseResponse{
+					IsSuccess: false,
+					Message:   "insufficient permissions: " + permission + " required",
+				})
+			}
+
+			return next(c)
+		}
 	}
 }

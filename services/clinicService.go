@@ -54,6 +54,14 @@ func RegisterClinic(req reqdto.RegisterClinicRequest) (resdto.RegisterClinicResp
 		}, err
 	}
 
+	// Get owner role ID from clinic_roles table
+	var ownerRole models.ClinicRole
+	if err := db.Where("name = ?", models.ClinicRoleOwner).First(&ownerRole).Error; err != nil {
+		return resdto.RegisterClinicResponse{
+			BaseResponse: resdto.BaseResponse{IsSuccess: false, Message: "owner role not found - please run database seeding"},
+		}, errors.New("owner role not found in clinic_roles table")
+	}
+
 	// Start transaction
 	tx := db.Begin()
 
@@ -80,7 +88,7 @@ func RegisterClinic(req reqdto.RegisterClinicRequest) (resdto.RegisterClinicResp
 		Email:        req.OwnerEmail,
 		PasswordHash: hashedPassword,
 		Name:         req.OwnerName,
-		Role:         models.ClinicRoleOwner,
+		RoleID:       ownerRole.ID,
 		Status:       "active",
 	}
 
@@ -131,28 +139,71 @@ func ClinicLogin(req reqdto.ClinicLoginRequest) (*resdto.ClinicLoginResponse, er
 		return nil, errors.New("database not initialized")
 	}
 
-	// Find clinic user by email with clinic relation
-	var clinicUser models.ClinicUser
-	if err := db.Preload("Clinic").Where("email = ?", req.Email).First(&clinicUser).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, errors.New("invalid email or password")
-		}
-		return nil, err
-	}
-
-	// Check if user is active
-	if clinicUser.Status != "active" {
-		return nil, errors.New("account is inactive")
-	}
-
-	// Check if clinic is active
-	if clinicUser.Clinic.Status != "active" {
-		return nil, errors.New("clinic is inactive or suspended")
-	}
-
-	// Verify password
-	if !CheckPasswordHash(req.Password, clinicUser.PasswordHash) {
+	// Find all clinic users with this email
+	var clinicUsers []models.ClinicUser
+	if err := db.Preload("Clinic").Preload("Role").Where("email = ?", req.Email).Find(&clinicUsers).Error; err != nil {
 		return nil, errors.New("invalid email or password")
+	}
+
+	if len(clinicUsers) == 0 {
+		return nil, errors.New("invalid email or password")
+	}
+
+	// Verify password against first record (all records share same password)
+	if !CheckPasswordHash(req.Password, clinicUsers[0].PasswordHash) {
+		return nil, errors.New("invalid email or password")
+	}
+
+	// Filter only active users at active clinics
+	var activeUsers []models.ClinicUser
+	for _, u := range clinicUsers {
+		if u.Status == "active" && u.Clinic.Status == "active" {
+			activeUsers = append(activeUsers, u)
+		}
+	}
+
+	if len(activeUsers) == 0 {
+		return nil, errors.New("account is inactive or clinic is suspended")
+	}
+
+	// If multiple clinics and no clinic_id provided → return clinic selection list
+	if len(activeUsers) > 1 && req.ClinicID == nil {
+		clinicList := make([]resdto.ClinicSelectionDTO, 0, len(activeUsers))
+		for _, u := range activeUsers {
+			clinicList = append(clinicList, resdto.ClinicSelectionDTO{
+				ID:   u.Clinic.ID,
+				Name: u.Clinic.Name,
+				Logo: u.Clinic.Logo,
+				Role: u.Role.Name,
+			})
+		}
+
+		resp := &resdto.ClinicLoginResponse{}
+		resp.IsSuccess = true
+		resp.Message = "multiple clinics found, please select one"
+		resp.Data.RequiresClinicSelection = true
+		resp.Data.Clinics = clinicList
+		return resp, nil
+	}
+
+	// Determine which user to log in
+	var clinicUser models.ClinicUser
+	if req.ClinicID != nil {
+		// Find user at specific clinic
+		found := false
+		for _, u := range activeUsers {
+			if u.ClinicID == *req.ClinicID {
+				clinicUser = u
+				found = true
+				break
+			}
+		}
+		if !found {
+			return nil, errors.New("user not found at this clinic")
+		}
+	} else {
+		// Single clinic - login directly
+		clinicUser = activeUsers[0]
 	}
 
 	// Update last login
@@ -160,8 +211,8 @@ func ClinicLogin(req reqdto.ClinicLoginRequest) (*resdto.ClinicLoginResponse, er
 	clinicUser.LastLogin = &now
 	db.Save(&clinicUser)
 
-	// Generate tokens (include clinic_id and role in JWT)
-	accessToken, err := GenerateClinicJWT(clinicUser.Email, clinicUser.ID, clinicUser.ClinicID, clinicUser.Role)
+	// Generate tokens
+	accessToken, err := GenerateClinicJWT(clinicUser.Email, clinicUser.ID, clinicUser.ClinicID, clinicUser.Role.Name)
 	if err != nil {
 		return nil, err
 	}
@@ -179,12 +230,12 @@ func ClinicLogin(req reqdto.ClinicLoginRequest) (*resdto.ClinicLoginResponse, er
 	resp.Data.RefreshToken = refreshToken
 	resp.Data.AccessExpiresAt = time.Now().Add(accessTokenDuration).Unix()
 	resp.Data.RefreshExpiresAt = time.Now().Add(refreshTokenDuration).Unix()
-	resp.Data.ClinicUser = resdto.ClinicUserDTO{
+	clinicUserDTO := resdto.ClinicUserDTO{
 		ID:       clinicUser.ID,
 		ClinicID: clinicUser.ClinicID,
 		Email:    clinicUser.Email,
 		Name:     clinicUser.Name,
-		Role:     clinicUser.Role,
+		Role:     clinicUser.Role.Name,
 		Status:   clinicUser.Status,
 		Clinic: &resdto.ClinicDTO{
 			ID:      clinicUser.Clinic.ID,
@@ -196,6 +247,109 @@ func ClinicLogin(req reqdto.ClinicLoginRequest) (*resdto.ClinicLoginResponse, er
 			Status:  clinicUser.Clinic.Status,
 		},
 	}
+	resp.Data.ClinicUser = &clinicUserDTO
 
 	return resp, nil
+}
+
+// RegisterClinicUser creates a new clinic user (staff) - only owner can do this
+func RegisterClinicUser(req reqdto.RegisterClinicUserRequest, clinicID uint64) (*resdto.RegisterClinicUserResponse, error) {
+	db := config.DB
+	if db == nil {
+		return nil, errors.New("database not initialized")
+	}
+
+	// Validate the role exists
+	var role models.ClinicRole
+	if err := db.First(&role, req.RoleID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, errors.New("invalid role_id")
+		}
+		return nil, err
+	}
+
+	// Prevent creating another owner
+	if role.Name == models.ClinicRoleOwner {
+		return nil, errors.New("cannot create another owner for the clinic")
+	}
+
+	// Check if email already exists at THIS clinic
+	var existingUser models.ClinicUser
+	if err := db.Where("email = ? AND clinic_id = ?", req.Email, clinicID).First(&existingUser).Error; err == nil {
+		return nil, errors.New("user with this email already exists at this clinic")
+	}
+
+	// Check if email exists at another clinic - reuse password
+	var existingElsewhere models.ClinicUser
+	var plainPassword string
+	var hashedPassword string
+
+	if err := db.Where("email = ?", req.Email).First(&existingElsewhere).Error; err == nil {
+		// Same person at another clinic - reuse password hash
+		hashedPassword = existingElsewhere.PasswordHash
+		plainPassword = "" // Don't return password since it's the same as existing
+	} else {
+		// New user - generate password
+		var genErr error
+		plainPassword, genErr = utils.GenerateSecurePassword()
+		if genErr != nil {
+			return nil, errors.New("failed to generate password")
+		}
+		var hashErr error
+		hashedPassword, hashErr = HashPassword(plainPassword)
+		if hashErr != nil {
+			return nil, errors.New("failed to hash password")
+		}
+	}
+
+	// Create clinic user
+	clinicUser := models.ClinicUser{
+		ClinicID:     clinicID,
+		Email:        req.Email,
+		PasswordHash: hashedPassword,
+		Name:         req.Name,
+		RoleID:       req.RoleID,
+		Status:       "active",
+	}
+
+	if err := db.Create(&clinicUser).Error; err != nil {
+		return nil, errors.New("failed to create clinic user")
+	}
+
+	// Get clinic name for email
+	var clinic models.Clinic
+	db.First(&clinic, clinicID)
+
+	message := "Clinic user registered successfully."
+	if plainPassword != "" {
+		// New user - send email with credentials
+		emailErr := utils.SendClinicCredentialsEmail(
+			clinicUser.Email,
+			clinicUser.Name,
+			clinic.Name,
+			plainPassword,
+		)
+		message = "Clinic user registered successfully. Credentials sent to email."
+		if emailErr != nil {
+			message = "Clinic user registered successfully. Email sending failed - please share credentials manually."
+		}
+	} else {
+		message = "Clinic user registered successfully. User already exists - same password as existing account."
+	}
+
+	return &resdto.RegisterClinicUserResponse{
+		BaseResponse: resdto.BaseResponse{
+			IsSuccess: true,
+			Message:   message,
+		},
+		Data: &resdto.RegisterClinicUserData{
+			ID:       clinicUser.ID,
+			ClinicID: clinicUser.ClinicID,
+			Email:    clinicUser.Email,
+			Name:     clinicUser.Name,
+			Role:     role.Name,
+			Password: plainPassword,
+			Status:   clinicUser.Status,
+		},
+	}, nil
 }

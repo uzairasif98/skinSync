@@ -64,3 +64,42 @@ func ClinicLoginHandler(c echo.Context) error {
 
 	return c.JSON(http.StatusOK, resp)
 }
+
+// RegisterClinicUserHandler handles clinic user (staff) registration by owner
+func RegisterClinicUserHandler(c echo.Context) error {
+	// Get clinic_id from context (set by ClinicAuthMiddleware)
+	clinicIDFloat, ok := c.Get("clinic_id").(float64)
+	if !ok {
+		return c.JSON(http.StatusUnauthorized, resdto.BaseResponse{
+			IsSuccess: false,
+			Message:   "clinic_id not found in context",
+		})
+	}
+	clinicID := uint64(clinicIDFloat)
+
+	var req reqdto.RegisterClinicUserRequest
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, resdto.BaseResponse{
+			IsSuccess: false,
+			Message:   err.Error(),
+		})
+	}
+
+	// Validate required fields
+	if req.Email == "" || req.Name == "" || req.RoleID == 0 {
+		return c.JSON(http.StatusBadRequest, resdto.BaseResponse{
+			IsSuccess: false,
+			Message:   "email, name, and role_id are required",
+		})
+	}
+
+	resp, err := services.RegisterClinicUser(req, clinicID)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, resdto.BaseResponse{
+			IsSuccess: false,
+			Message:   err.Error(),
+		})
+	}
+
+	return c.JSON(http.StatusCreated, resp)
+}

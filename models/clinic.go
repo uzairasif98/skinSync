@@ -25,14 +25,27 @@ func (Clinic) TableName() string {
 	return "clinics"
 }
 
+// ClinicRole represents roles specific to clinic users (separate from admin roles)
+type ClinicRole struct {
+	ID          uint64    `gorm:"primaryKey;autoIncrement" json:"id"`
+	Name        string    `gorm:"size:50;uniqueIndex;not null" json:"name"`
+	Description string    `gorm:"size:255" json:"description,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+func (ClinicRole) TableName() string {
+	return "clinic_roles"
+}
+
 // ClinicUser represents users belonging to a clinic
 type ClinicUser struct {
 	ID           uint64     `gorm:"primaryKey;autoIncrement" json:"id"`
-	ClinicID     uint64     `gorm:"not null;index" json:"clinic_id"`
-	Email        string     `gorm:"size:255;uniqueIndex;not null" json:"email"`
+	ClinicID     uint64     `gorm:"not null;uniqueIndex:idx_email_clinic" json:"clinic_id"`
+	Email        string     `gorm:"size:255;not null;uniqueIndex:idx_email_clinic" json:"email"`
 	PasswordHash string     `gorm:"size:255;not null" json:"-"`
 	Name         string     `gorm:"size:100;not null" json:"name"`
-	Role         string     `gorm:"size:50;not null" json:"role"` // owner, doctor, injector, receptionist
+	RoleID       uint64     `gorm:"not null" json:"role_id"`
 	Status       string     `gorm:"size:20;default:'active'" json:"status"`
 	LastLogin    *time.Time `json:"last_login,omitempty"`
 	CreatedAt    time.Time  `json:"created_at"`
@@ -40,17 +53,80 @@ type ClinicUser struct {
 	DeletedAt    *time.Time `gorm:"index" json:"-"`
 
 	// Relationships
-	Clinic Clinic `gorm:"foreignKey:ClinicID;constraint:OnDelete:CASCADE" json:"clinic,omitempty"`
+	Clinic Clinic     `gorm:"foreignKey:ClinicID;constraint:OnDelete:CASCADE" json:"clinic,omitempty"`
+	Role   ClinicRole `gorm:"foreignKey:RoleID" json:"role,omitempty"`
 }
 
 func (ClinicUser) TableName() string {
 	return "clinic_users"
 }
 
-// Clinic user roles
+// Clinic role name constants
 const (
 	ClinicRoleOwner        = "owner"
+	ClinicRoleManager      = "manager"
 	ClinicRoleDoctor       = "doctor"
 	ClinicRoleInjector     = "injector"
 	ClinicRoleReceptionist = "receptionist"
 )
+
+// ClinicPermission represents permissions specific to clinic users
+type ClinicPermission struct {
+	ID          uint64  `gorm:"primaryKey;autoIncrement" json:"id"`
+	Name        string  `gorm:"size:100;uniqueIndex;not null" json:"name"`
+	Description *string `gorm:"size:255" json:"description,omitempty"`
+}
+
+func (ClinicPermission) TableName() string {
+	return "clinic_permissions"
+}
+
+// ClinicRolePermission maps clinic roles to clinic permissions
+type ClinicRolePermission struct {
+	ID           uint64 `gorm:"primaryKey;autoIncrement" json:"id"`
+	RoleID       uint64 `gorm:"not null;index:idx_clinic_role_perm,unique" json:"role_id"`
+	PermissionID uint64 `gorm:"not null;index:idx_clinic_role_perm,unique" json:"permission_id"`
+
+	// Relationships
+	Role       ClinicRole       `gorm:"foreignKey:RoleID;constraint:OnDelete:CASCADE" json:"-"`
+	Permission ClinicPermission `gorm:"foreignKey:PermissionID;constraint:OnDelete:CASCADE" json:"-"`
+}
+
+func (ClinicRolePermission) TableName() string {
+	return "clinic_role_permissions"
+}
+
+// ClinicTreatment maps which treatments a clinic offers
+type ClinicTreatment struct {
+	ID          uint64    `gorm:"primaryKey;autoIncrement" json:"id"`
+	ClinicID    uint64    `gorm:"not null;uniqueIndex:idx_clinic_treatment" json:"clinic_id"`
+	TreatmentID uint     `gorm:"not null;uniqueIndex:idx_clinic_treatment" json:"treatment_id"`
+	Price       *float64  `json:"price,omitempty"`
+	Status      string    `gorm:"size:20;default:'active'" json:"status"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+
+	// Relationships
+	Clinic    Clinic    `gorm:"foreignKey:ClinicID;constraint:OnDelete:CASCADE" json:"clinic,omitempty"`
+	Treatment Treatment `gorm:"foreignKey:TreatmentID;constraint:OnDelete:CASCADE" json:"treatment,omitempty"`
+}
+
+func (ClinicTreatment) TableName() string {
+	return "clinic_treatments"
+}
+
+// ClinicUserTreatment maps which treatments a doctor can perform
+type ClinicUserTreatment struct {
+	ID          uint64    `gorm:"primaryKey;autoIncrement" json:"id"`
+	ClinicUserID uint64   `gorm:"not null;uniqueIndex:idx_user_treatment" json:"clinic_user_id"`
+	TreatmentID uint     `gorm:"not null;uniqueIndex:idx_user_treatment" json:"treatment_id"`
+	CreatedAt   time.Time `json:"created_at"`
+
+	// Relationships
+	ClinicUser ClinicUser `gorm:"foreignKey:ClinicUserID;constraint:OnDelete:CASCADE" json:"clinic_user,omitempty"`
+	Treatment  Treatment  `gorm:"foreignKey:TreatmentID;constraint:OnDelete:CASCADE" json:"treatment,omitempty"`
+}
+
+func (ClinicUserTreatment) TableName() string {
+	return "clinic_user_treatments"
+}

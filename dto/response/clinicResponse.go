@@ -46,9 +46,36 @@ type ClinicLoginResponse struct {
 
 // ClinicLoginData contains login tokens and user info
 type ClinicLoginData struct {
-	AccessToken      string         `json:"access_token"`
-	RefreshToken     string         `json:"refresh_token"`
-	AccessExpiresAt  int64          `json:"access_expires_at"`
-	RefreshExpiresAt int64          `json:"refresh_expires_at"`
-	ClinicUser       ClinicUserDTO  `json:"clinic_user"`
+	AccessToken            string              `json:"access_token,omitempty"`
+	RefreshToken           string              `json:"refresh_token,omitempty"`
+	AccessExpiresAt        int64               `json:"access_expires_at,omitempty"`
+	RefreshExpiresAt       int64               `json:"refresh_expires_at,omitempty"`
+	ClinicUser             *ClinicUserDTO      `json:"clinic_user,omitempty"`
+	RequiresClinicSelection bool               `json:"requires_clinic_selection,omitempty"`
+	Clinics                []ClinicSelectionDTO `json:"clinics,omitempty"`
+}
+
+// ClinicSelectionDTO represents clinic info shown during multi-clinic login selection
+type ClinicSelectionDTO struct {
+	ID   uint64 `json:"id"`
+	Name string `json:"name"`
+	Logo string `json:"logo,omitempty"`
+	Role string `json:"role"`
+}
+
+// RegisterClinicUserResponse represents clinic user registration response
+type RegisterClinicUserResponse struct {
+	BaseResponse
+	Data *RegisterClinicUserData `json:"data,omitempty"`
+}
+
+// RegisterClinicUserData contains registered clinic user info
+type RegisterClinicUserData struct {
+	ID       uint64 `json:"id"`
+	ClinicID uint64 `json:"clinic_id"`
+	Email    string `json:"email"`
+	Name     string `json:"name"`
+	Role     string `json:"role"`
+	Password string `json:"password"` // Plain password (only returned once)
+	Status   string `json:"status"`
 }

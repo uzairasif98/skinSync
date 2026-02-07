@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 
 	"github.com/joho/godotenv"
+	"golang.org/x/crypto/bcrypt"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 
@@ -83,7 +85,12 @@ func ConnectDB() {
 		&models.SideArea{},
 		// clinic tables
 		&models.Clinic{},
+		&models.ClinicRole{},
+		&models.ClinicPermission{},
+		&models.ClinicRolePermission{},
 		&models.ClinicUser{},
+		&models.ClinicTreatment{},
+		&models.ClinicUserTreatment{},
 	); err != nil {
 		// attempt to close DB on migration error
 		if cerr := CloseDB(); cerr != nil {
@@ -93,6 +100,8 @@ func ConnectDB() {
 	}
 	SeedOnboardingData()
 	SeedRBACData()
+	SeedClinicRoles()
+	SeedDiscoveryData()
 	log.Println("Database connection established")
 }
 
@@ -271,4 +280,277 @@ func SeedRBACData() {
 	}
 
 	log.Println("RBAC data seeded successfully")
+}
+
+// SeedClinicRoles creates predefined clinic roles, permissions, and mappings (idempotent)
+func SeedClinicRoles() {
+	db := DB
+	if db == nil {
+		log.Println("DB not initialized, skipping clinic roles seeding")
+		return
+	}
+
+	// Define clinic-specific permissions
+	clinicPermissions := []struct {
+		Name        string
+		Description string
+	}{
+		// Staff Management
+		{"staff.view", "View clinic staff"},
+		{"staff.create", "Create/Register clinic staff"},
+		{"staff.edit", "Edit clinic staff"},
+		{"staff.delete", "Delete clinic staff"},
+
+		// Appointment Management
+		{"appointments.view", "View appointments"},
+		{"appointments.create", "Create appointments"},
+		{"appointments.edit", "Edit appointments"},
+		{"appointments.delete", "Delete/Cancel appointments"},
+
+		// Patient Management
+		{"patients.view", "View patient records"},
+		{"patients.create", "Create patient records"},
+		{"patients.edit", "Edit patient records"},
+		{"patients.delete", "Delete patient records"},
+
+		// Treatment Records
+		{"treatment_records.view", "View treatment records"},
+		{"treatment_records.create", "Create treatment records"},
+		{"treatment_records.edit", "Edit treatment records"},
+
+		// Clinic Settings
+		{"clinic.view", "View clinic settings"},
+		{"clinic.edit", "Edit clinic settings"},
+
+		// Reports
+		{"reports.view", "View reports and analytics"},
+		{"reports.export", "Export reports"},
+
+		// Profile
+		{"profile.view", "View own profile"},
+		{"profile.edit", "Edit own profile"},
+	}
+
+	// Create clinic permissions (idempotent)
+	clinicPermMap := make(map[string]uint64)
+	for _, p := range clinicPermissions {
+		var perm models.ClinicPermission
+		desc := p.Description
+		db.Where("name = ?", p.Name).FirstOrCreate(&perm, models.ClinicPermission{
+			Name:        p.Name,
+			Description: &desc,
+		})
+		clinicPermMap[p.Name] = perm.ID
+	}
+
+	// Define clinic roles with their permissions
+	clinicRoles := []struct {
+		Name        string
+		Description string
+		Permissions []string
+	}{
+		{
+			Name:        models.ClinicRoleOwner,
+			Description: "Clinic owner with full access to clinic management",
+			Permissions: []string{
+				"staff.view", "staff.create", "staff.edit", "staff.delete",
+				"appointments.view", "appointments.create", "appointments.edit", "appointments.delete",
+				"patients.view", "patients.create", "patients.edit", "patients.delete",
+				"treatment_records.view", "treatment_records.create", "treatment_records.edit",
+				"clinic.view", "clinic.edit",
+				"reports.view", "reports.export",
+				"profile.view", "profile.edit",
+			},
+		},
+		{
+			Name:        models.ClinicRoleManager,
+			Description: "Clinic manager with administrative access",
+			Permissions: []string{
+				"staff.view", "staff.create", "staff.edit",
+				"appointments.view", "appointments.create", "appointments.edit", "appointments.delete",
+				"patients.view", "patients.create", "patients.edit",
+				"treatment_records.view",
+				"clinic.view",
+				"reports.view",
+				"profile.view", "profile.edit",
+			},
+		},
+		{
+			Name:        models.ClinicRoleDoctor,
+			Description: "Doctor/Physician at the clinic",
+			Permissions: []string{
+				"appointments.view", "appointments.edit",
+				"patients.view", "patients.edit",
+				"treatment_records.view", "treatment_records.create", "treatment_records.edit",
+				"profile.view", "profile.edit",
+			},
+		},
+		{
+			Name:        models.ClinicRoleInjector,
+			Description: "Injector/Aesthetician performing treatments",
+			Permissions: []string{
+				"appointments.view",
+				"patients.view",
+				"treatment_records.view", "treatment_records.create",
+				"profile.view", "profile.edit",
+			},
+		},
+		{
+			Name:        models.ClinicRoleReceptionist,
+			Description: "Front desk staff handling appointments",
+			Permissions: []string{
+				"appointments.view", "appointments.create", "appointments.edit",
+				"patients.view", "patients.create",
+				"profile.view", "profile.edit",
+			},
+		},
+	}
+
+	// Create clinic roles and assign permissions (idempotent)
+	for _, r := range clinicRoles {
+		var role models.ClinicRole
+		db.Where("name = ?", r.Name).FirstOrCreate(&role, models.ClinicRole{
+			Name:        r.Name,
+			Description: r.Description,
+		})
+
+		// Remove existing role permissions
+		db.Where("role_id = ?", role.ID).Delete(&models.ClinicRolePermission{})
+
+		// Add permissions to role
+		for _, permName := range r.Permissions {
+			if permID, ok := clinicPermMap[permName]; ok {
+				db.Create(&models.ClinicRolePermission{
+					RoleID:       role.ID,
+					PermissionID: permID,
+				})
+			}
+		}
+	}
+
+	log.Println("Clinic roles and permissions seeded successfully")
+}
+
+// SeedDiscoveryData seeds sample clinics, doctors, and treatment mappings (idempotent)
+func SeedDiscoveryData() {
+	db := DB
+	if db == nil {
+		log.Println("DB not initialized, skipping discovery seeding")
+		return
+	}
+
+	// Get role IDs
+	var ownerRole, doctorRole models.ClinicRole
+	db.Where("name = ?", models.ClinicRoleOwner).First(&ownerRole)
+	db.Where("name = ?", models.ClinicRoleDoctor).First(&doctorRole)
+
+	if ownerRole.ID == 0 || doctorRole.ID == 0 {
+		log.Println("Clinic roles not found, skipping discovery seeding")
+		return
+	}
+
+	// Get all treatments
+	var treatments []models.Treatment
+	db.Find(&treatments)
+	if len(treatments) == 0 {
+		log.Println("No treatments found, skipping discovery seeding")
+		return
+	}
+
+	// Build treatment map by name
+	treatmentMap := make(map[string]uint)
+	for _, t := range treatments {
+		treatmentMap[t.Name] = t.ID
+	}
+
+	// Define sample clinics
+	sampleClinics := []struct {
+		Name    string
+		Email   string
+		Phone   string
+		Address string
+	}{
+		{"GlowUp Aesthetics", "info@glowup.com", "+1-555-0101", "456 Beauty Ave, Los Angeles, CA 90001"},
+		{"SkinPerfect Clinic", "hello@skinperfect.com", "+1-555-0202", "789 Wellness Blvd, Miami, FL 33101"},
+		{"Elite Derma Center", "contact@elitederma.com", "+1-555-0303", "321 Medical Plaza, New York, NY 10001"},
+	}
+
+	// Hash a default password for sample users
+	defaultHash, err := hashPasswordForSeed("SeedPass@123")
+	if err != nil {
+		log.Printf("Failed to hash seed password: %v", err)
+		return
+	}
+
+	for _, sc := range sampleClinics {
+		// Create clinic (idempotent)
+		var clinic models.Clinic
+		db.Where("email = ?", sc.Email).FirstOrCreate(&clinic, models.Clinic{
+			Name:    sc.Name,
+			Email:   sc.Email,
+			Phone:   sc.Phone,
+			Address: sc.Address,
+			Status:  "active",
+		})
+
+		// Create owner for clinic (idempotent)
+		ownerEmail := "owner@" + sc.Email[strings.Index(sc.Email, "@")+1:]
+		var owner models.ClinicUser
+		db.Where("email = ? AND clinic_id = ?", ownerEmail, clinic.ID).FirstOrCreate(&owner, models.ClinicUser{
+			ClinicID:     clinic.ID,
+			Email:        ownerEmail,
+			PasswordHash: defaultHash,
+			Name:         "Owner of " + sc.Name,
+			RoleID:       ownerRole.ID,
+			Status:       "active",
+		})
+
+		// Create 2 doctors per clinic
+		for i, docName := range []string{"Dr. Sarah Johnson", "Dr. Michael Chen"} {
+			docEmail := fmt.Sprintf("doctor%d@%s", i+1, sc.Email[strings.Index(sc.Email, "@")+1:])
+			var doc models.ClinicUser
+			db.Where("email = ? AND clinic_id = ?", docEmail, clinic.ID).FirstOrCreate(&doc, models.ClinicUser{
+				ClinicID:     clinic.ID,
+				Email:        docEmail,
+				PasswordHash: defaultHash,
+				Name:         docName,
+				RoleID:       doctorRole.ID,
+				Status:       "active",
+			})
+
+			// Assign all treatments to doctors
+			for _, t := range treatments {
+				var ut models.ClinicUserTreatment
+				db.Where("clinic_user_id = ? AND treatment_id = ?", doc.ID, t.ID).
+					FirstOrCreate(&ut, models.ClinicUserTreatment{
+						ClinicUserID: doc.ID,
+						TreatmentID:  t.ID,
+					})
+			}
+		}
+
+		// Assign all treatments to clinic
+		for _, t := range treatments {
+			price := 250.0 + float64(clinic.ID*50) + float64(t.ID*25) // varied pricing
+			var ct models.ClinicTreatment
+			db.Where("clinic_id = ? AND treatment_id = ?", clinic.ID, t.ID).
+				FirstOrCreate(&ct, models.ClinicTreatment{
+					ClinicID:    clinic.ID,
+					TreatmentID: t.ID,
+					Price:       &price,
+					Status:      "active",
+				})
+		}
+	}
+
+	log.Println("Discovery sample data seeded successfully")
+}
+
+// hashPasswordForSeed hashes password using bcrypt (for seeding only)
+func hashPasswordForSeed(password string) (string, error) {
+	hashedBytes, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return "", err
+	}
+	return string(hashedBytes), nil
 }

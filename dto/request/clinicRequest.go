@@ -16,6 +16,14 @@ type RegisterClinicRequest struct {
 
 // ClinicLoginRequest represents clinic user login request
 type ClinicLoginRequest struct {
-	Email    string `json:"email" validate:"required,email"`
-	Password string `json:"password" validate:"required,min=6"`
+	Email    string  `json:"email" validate:"required,email"`
+	Password string  `json:"password" validate:"required,min=6"`
+	ClinicID *uint64 `json:"clinic_id,omitempty"` // Optional: required when user belongs to multiple clinics
+}
+
+// RegisterClinicUserRequest represents request to register a new clinic user (staff)
+type RegisterClinicUserRequest struct {
+	Email  string `json:"email" validate:"required,email"`
+	Name   string `json:"name" validate:"required,min=2"`
+	RoleID uint64 `json:"role_id" validate:"required"`
 }
