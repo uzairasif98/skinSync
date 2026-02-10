@@ -502,3 +502,99 @@ func GetSideAreasByTreatment(treatmentID uint) (resdto.SideAreasResponse, error)
 		Data:      data,
 	}, nil
 }
+
+// GetTreatmentsByClinic returns all treatments offered by a clinic with their side area prices
+func GetTreatmentByClinic(clinicID uint64) (resdto.GetClinicTreatmentsResponse, error) {
+	db := config.DB
+
+	// Get all clinic treatments
+	var clinicTreatments []models.ClinicTreatment
+	err := db.Where("clinic_id = ? AND status = ?", clinicID, "active").
+		Preload("Treatment").
+		Find(&clinicTreatments).Error
+	if err != nil {
+		return resdto.GetClinicTreatmentsResponse{
+			BaseResponse: resdto.BaseResponse{IsSuccess: false, Message: "Failed to fetch treatments"},
+		}, err
+	}
+
+	var treatmentDTOs []resdto.ClinicTreatmentDTO
+
+	// For each treatment, get areas and side areas with prices
+	for _, ct := range clinicTreatments {
+		// Get areas for this treatment
+		var areas []models.Area
+		err := db.Where("treatment_id = ?", ct.TreatmentID).Find(&areas).Error
+		if err != nil {
+			continue
+		}
+
+		var areaDTOs []resdto.ClinicAreaDTO
+
+		for _, area := range areas {
+			// Get side areas with clinic prices
+			var clinicSideAreas []models.ClinicSideArea
+			err := db.Where("clinic_id = ? AND treatment_id = ? AND area_id = ? AND status = ?",
+				clinicID, ct.TreatmentID, area.ID, "active").
+				Find(&clinicSideAreas).Error
+			if err != nil {
+				continue
+			}
+
+			var sideAreaDTOs []resdto.ClinicSideAreaPriceDTO
+
+			for _, csa := range clinicSideAreas {
+				// Get side area details
+				var sideArea models.SideArea
+				err := db.Where("id = ?", csa.SideAreaID).First(&sideArea).Error
+				if err != nil {
+					continue
+				}
+
+				// Generate syringe options
+				var syringeOptions []int
+				for i := sideArea.MinSyringe; i <= sideArea.MaxSyringe; i++ {
+					syringeOptions = append(syringeOptions, i)
+				}
+
+				sideAreaDTOs = append(sideAreaDTOs, resdto.ClinicSideAreaPriceDTO{
+					ID:          csa.ID,
+					SideAreaID:  sideArea.ID,
+					Name:        sideArea.Name,
+					Icon:        sideArea.Icon,
+					Description: sideArea.Description,
+					MinSyringe:  sideArea.MinSyringe,
+					MaxSyringe:  sideArea.MaxSyringe,
+					Price:       csa.Price,
+					Status:      csa.Status,
+				})
+			}
+
+			if len(sideAreaDTOs) > 0 {
+				areaDTOs = append(areaDTOs, resdto.ClinicAreaDTO{
+					ID:          area.ID,
+					AreaID:      area.ID,
+					Name:        area.Name,
+					Icon:        area.Icon,
+					Description: area.Description,
+					SideAreas:   sideAreaDTOs,
+				})
+			}
+		}
+
+		treatmentDTOs = append(treatmentDTOs, resdto.ClinicTreatmentDTO{
+			ID:          ct.TreatmentID,
+			Name:        ct.Treatment.Name,
+			Icon:        ct.Treatment.Icon,
+			Description: ct.Treatment.Description,
+			Price:       ct.Price,
+			Areas:       areaDTOs,
+			Status:      ct.Status,
+		})
+	}
+
+	return resdto.GetClinicTreatmentsResponse{
+		BaseResponse: resdto.BaseResponse{IsSuccess: true, Message: "Treatments retrieved successfully"},
+		Data:         treatmentDTOs,
+	}, nil
+}

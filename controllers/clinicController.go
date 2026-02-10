@@ -196,3 +196,28 @@ func GetSideAreasByTreatmentHandler(c echo.Context) error {
 	}
 	return c.JSON(http.StatusOK, resp)
 }
+
+// GetTreatmentsByClinicHandler handles GET /clinic/treatments
+func GetTreatmentByClinicHandler(c echo.Context) error {
+	// Get clinic_id from context (set by ClinicAuthMiddleware)
+	clinicIDFloat, ok := c.Get("clinic_id").(float64)
+	if !ok {
+		return c.JSON(http.StatusUnauthorized, resdto.BaseResponse{
+			IsSuccess: false,
+			Message:   "clinic_id not found in context",
+		})
+	}
+	clinicID := uint64(clinicIDFloat)
+
+	resp, err := services.GetTreatmentsByClinic(clinicID)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, resdto.GetClinicTreatmentsResponse{
+			BaseResponse: resdto.BaseResponse{
+				IsSuccess: false,
+				Message:   "Failed to fetch treatments",
+			},
+		})
+	}
+
+	return c.JSON(http.StatusOK, resp)
+}
