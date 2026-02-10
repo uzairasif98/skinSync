@@ -460,3 +460,45 @@ func UpsertClinicSideAreasFromAreaRequest(req AreaPriceRequest, clinicID uint64)
 		DoUpdates: clause.AssignmentColumns([]string{"price", "status", "updated_at"}),
 	}).Create(&rows).Error
 }
+
+// GetSideAreasByTreatment returns all side areas for a given treatment ID
+func GetSideAreasByTreatment(treatmentID uint) (resdto.SideAreasResponse, error) {
+	db := config.DB
+
+	var sideAreas []models.SideArea
+
+	err := db.Where("treatment_id = ?", treatmentID).Find(&sideAreas).Error
+	if err != nil {
+		return resdto.SideAreasResponse{
+			IsSuccess: false,
+			Message:   "Failed to fetch side areas",
+			Data:      nil,
+		}, err
+	}
+
+	// Convert to DTOs
+	var data []resdto.SideAreaDTO
+	for _, sa := range sideAreas {
+		// Generate syringe options from min to max
+		var syringeOptions []int
+		for i := sa.MinSyringe; i <= sa.MaxSyringe; i++ {
+			syringeOptions = append(syringeOptions, i)
+		}
+
+		data = append(data, resdto.SideAreaDTO{
+			ID:             sa.ID,
+			Name:           sa.Name,
+			Icon:           sa.Icon,
+			Description:    sa.Description,
+			MinSyringe:     sa.MinSyringe,
+			MaxSyringe:     sa.MaxSyringe,
+			SyringeOptions: syringeOptions,
+		})
+	}
+
+	return resdto.SideAreasResponse{
+		IsSuccess: true,
+		Message:   "Side areas retrieved successfully",
+		Data:      data,
+	}, nil
+}

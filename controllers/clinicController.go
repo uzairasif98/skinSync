@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"net/http"
+	"strconv"
 
 	reqdto "skinSync/dto/request"
 	resdto "skinSync/dto/response"
@@ -172,4 +173,26 @@ func CreateClinicSideAreasFromAreaHandler(c echo.Context) error {
 		IsSuccess: true,
 		Message:   "clinic side areas saved",
 	})
+}
+
+// GetSideAreasByTreatmentHandler handles GET /clinic/side-areas/treatment/:treatmentId
+func GetSideAreasByTreatmentHandler(c echo.Context) error {
+	treatmentID, err := strconv.ParseUint(c.Param("treatmentId"), 10, 32)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, resdto.SideAreasResponse{
+			IsSuccess: false,
+			Message:   "Invalid treatment ID",
+			Data:      nil,
+		})
+	}
+
+	resp, err := services.GetSideAreasByTreatment(uint(treatmentID))
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, resdto.SideAreasResponse{
+			IsSuccess: false,
+			Message:   "Failed to fetch side areas",
+			Data:      nil,
+		})
+	}
+	return c.JSON(http.StatusOK, resp)
 }

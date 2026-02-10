@@ -113,7 +113,8 @@ func SetupRoutes(e *echo.Group) {
 
 		// Bulk upsert: frontend sends treatment_id + area list
 		clinic.POST("/side-areas/bulk", controllers.CreateClinicSideAreasFromAreaHandler, middlewares.RequireClinicPermission("areas.edit"))
-
+		// Get side areas by treatment ID
+		clinic.GET("/side-areas/treatment/:treatmentId", controllers.GetSideAreasByTreatmentHandler)
 		// TODO: Add more clinic endpoints
 		// clinic.GET("/profile/me", controllers.GetClinicUserProfileHandler, middlewares.RequireClinicPermission("profile.view"))
 		// clinic.GET("/users", controllers.GetClinicUsersHandler, middlewares.RequireClinicPermission("staff.view"))
