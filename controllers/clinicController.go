@@ -209,7 +209,7 @@ func GetTreatmentByClinicHandler(c echo.Context) error {
 	}
 	clinicID := uint64(clinicIDFloat)
 
-	resp, err := services.GetTreatmentsByClinic(clinicID)
+	resp, err := services.GetTreatmentByClinic(clinicID)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, resdto.GetClinicTreatmentsResponse{
 			BaseResponse: resdto.BaseResponse{

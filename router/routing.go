@@ -116,7 +116,7 @@ func SetupRoutes(e *echo.Group) {
 		// Get side areas by treatment ID
 		clinic.GET("/side-areas/treatment/:treatmentId", controllers.GetSideAreasByTreatmentHandler)
 		// Get treatments with side area prices for clinic
-		clinic.GET("/treatments", controllers.GetTreatmentsByClinicHandler)
+		clinic.GET("/treatments", controllers.GetTreatmentByClinicHandler)
 		// TODO: Add more clinic endpoints
 		// clinic.GET("/profile/me", controllers.GetClinicUserProfileHandler, middlewares.RequireClinicPermission("profile.view"))
 		// clinic.GET("/users", controllers.GetClinicUsersHandler, middlewares.RequireClinicPermission("staff.view"))
