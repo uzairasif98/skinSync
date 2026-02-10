@@ -2,6 +2,7 @@ package services
 
 import (
 	"errors"
+	"fmt"
 	"time"
 
 	"skinSync/config"
@@ -11,6 +12,7 @@ import (
 	"skinSync/utils"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // RegisterClinic creates a new clinic and its owner (super_admin only)
@@ -352,4 +354,109 @@ func RegisterClinicUser(req reqdto.RegisterClinicUserRequest, clinicID uint64) (
 			Status:   clinicUser.Status,
 		},
 	}, nil
+}
+
+// SideAreaPayload is the payload shape when frontend sends side_area_id
+type SideAreaPayload struct {
+	ClinicID    uint64   `json:"clinic_id"`
+	SideAreaID  uint     `json:"side_area_id"`
+	SyringeSize int      `json:"syringe_size,omitempty"`
+	Price       *float64 `json:"price,omitempty"`
+	Status      string   `json:"status,omitempty"`
+}
+
+// UpsertClinicSideAreasFromSideArea accepts payloads where frontend sends side_area_id.
+// It looks up the SideArea to get AreaID and TreatmentID and upserts into clinic_side_areas.
+func UpsertClinicSideAreasFromSideArea(payload []SideAreaPayload) error {
+	if len(payload) == 0 {
+		return nil
+	}
+
+	db := config.DB
+
+	var rows []models.ClinicSideArea
+	for _, p := range payload {
+		// ensure side area exists and fetch its area_id and treatment_id
+		var sa models.SideArea
+		if err := db.First(&sa, p.SideAreaID).Error; err != nil {
+			return fmt.Errorf("side_area id %d not found: %w", p.SideAreaID, err)
+		}
+
+		row := models.ClinicSideArea{
+			ClinicID:    uint(p.ClinicID),
+			TreatmentID: sa.TreatmentID,
+			AreaID:      sa.AreaID,
+			SideAreaID:  sa.ID,
+			SyringeSize: p.SyringeSize,
+			Price:       p.Price,
+			Status:      p.Status,
+			CreatedAt:   time.Now(),
+			UpdatedAt:   time.Now(),
+		}
+		rows = append(rows, row)
+	}
+
+	// upsert on (clinic_id, treatment_id, area_id, side_area_id, syringe_size)
+	return db.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "clinic_id"}, {Name: "treatment_id"}, {Name: "area_id"}, {Name: "side_area_id"}, {Name: "syringe_size"}},
+		DoUpdates: clause.AssignmentColumns([]string{"price", "status", "updated_at"}),
+	}).Create(&rows).Error
+}
+
+// (Removed separate syringe price upsert) Use UpsertClinicSideAreasFromSideArea with SyringeSize to store per-size prices in clinic_side_areas.
+
+// AreaPriceItem represents price info sent per area by FE
+type AreaPriceItem struct {
+	AreaID uint     `json:"area_id"`
+	Price  *float64 `json:"price,omitempty"`
+	// optional syringe size if FE wants to set per-size price for all side areas
+	SyringeSize int `json:"syringe_size,omitempty"`
+}
+
+// AreaPriceRequest is the payload shape FE will send
+type AreaPriceRequest struct {
+	TreatmentID uint            `json:"treatment_id"`
+	Areas       []AreaPriceItem `json:"area"`
+}
+
+// UpsertClinicSideAreasFromAreaRequest accepts a payload where FE sends treatment_id and a list
+// of areas with prices. For each area it finds all SideAreas and upserts ClinicSideArea rows
+// (one row per SideArea). SyringeSize from the item is applied to all side areas (0 if omitted).
+func UpsertClinicSideAreasFromAreaRequest(req AreaPriceRequest, clinicID uint64) error {
+	if len(req.Areas) == 0 {
+		return nil
+	}
+	db := config.DB
+
+	var rows []models.ClinicSideArea
+	for _, it := range req.Areas {
+		var sideAreas []models.SideArea
+		if err := db.Where("treatment_id = ? AND area_id = ?", req.TreatmentID, it.AreaID).Find(&sideAreas).Error; err != nil {
+			return err
+		}
+
+		for _, sa := range sideAreas {
+			row := models.ClinicSideArea{
+				ClinicID:    uint(clinicID),
+				TreatmentID: sa.TreatmentID,
+				AreaID:      sa.AreaID,
+				SideAreaID:  sa.ID,
+				SyringeSize: it.SyringeSize,
+				Price:       it.Price,
+				Status:      "active",
+				CreatedAt:   time.Now(),
+				UpdatedAt:   time.Now(),
+			}
+			rows = append(rows, row)
+		}
+	}
+
+	if len(rows) == 0 {
+		return nil
+	}
+
+	return db.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "clinic_id"}, {Name: "treatment_id"}, {Name: "area_id"}, {Name: "side_area_id"}, {Name: "syringe_size"}},
+		DoUpdates: clause.AssignmentColumns([]string{"price", "status", "updated_at"}),
+	}).Create(&rows).Error
 }

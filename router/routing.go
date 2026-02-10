@@ -104,6 +104,16 @@ func SetupRoutes(e *echo.Group) {
 		// Staff management (owner only)
 		clinic.POST("/users/register", controllers.RegisterClinicUserHandler, middlewares.RequireClinicPermission("staff.create"))
 
+		// Clinic-managed areas and prices
+		// Frontend posts side_area_id (we resolve area/treatment) and optional syringe_size for per-size prices
+		clinic.POST("/side-areas", controllers.CreateClinicSideAreasFromSideAreaHandler, middlewares.RequireClinicPermission("areas.edit"))
+
+		// Per-size prices (frontend can include syringe_size in payload)
+		clinic.POST("/side-area-prices", controllers.CreateClinicSideAreasFromSideAreaHandler, middlewares.RequireClinicPermission("areas.edit"))
+
+		// Bulk upsert: frontend sends treatment_id + area list
+		clinic.POST("/side-areas/bulk", controllers.CreateClinicSideAreasFromAreaHandler, middlewares.RequireClinicPermission("areas.edit"))
+
 		// TODO: Add more clinic endpoints
 		// clinic.GET("/profile/me", controllers.GetClinicUserProfileHandler, middlewares.RequireClinicPermission("profile.view"))
 		// clinic.GET("/users", controllers.GetClinicUsersHandler, middlewares.RequireClinicPermission("staff.view"))

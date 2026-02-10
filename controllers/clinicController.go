@@ -103,3 +103,73 @@ func RegisterClinicUserHandler(c echo.Context) error {
 
 	return c.JSON(http.StatusCreated, resp)
 }
+
+// CreateClinicSideAreasFromSideAreaHandler handles POST /clinic/side-areas
+// Body: [{ "clinic_id":1, "side_area_id":4, "price":50.0, "status":"active" }, ...]
+// Frontend sends side_area_id; handler will lookup the side-area to get area_id and treatment_id
+func CreateClinicSideAreasFromSideAreaHandler(c echo.Context) error {
+	var payload []services.SideAreaPayload
+	if err := c.Bind(&payload); err != nil {
+		return c.JSON(http.StatusBadRequest, resdto.BaseResponse{
+			IsSuccess: false,
+			Message:   "invalid payload: " + err.Error(),
+		})
+	}
+
+	// fill clinic_id from context if middleware provides it
+	if clinicIDf, ok := c.Get("clinic_id").(float64); ok {
+		clinicID := uint64(clinicIDf)
+		for i := range payload {
+			if payload[i].ClinicID == 0 {
+				payload[i].ClinicID = clinicID
+			}
+		}
+	}
+
+	// call service to upsert (service will resolve side-area -> area/treatment)
+	if err := services.UpsertClinicSideAreasFromSideArea(payload); err != nil {
+		return c.JSON(http.StatusInternalServerError, resdto.BaseResponse{
+			IsSuccess: false,
+			Message:   "failed to save clinic side areas: " + err.Error(),
+		})
+	}
+
+	return c.JSON(http.StatusOK, resdto.BaseResponse{
+		IsSuccess: true,
+		Message:   "clinic side areas saved",
+	})
+}
+
+// CreateClinicSideAreasFromAreaHandler handles POST /clinic/side-areas/bulk
+// Body: { "treatment_id":51, "area": [ { "area_id":1, "price":75.0 }, ... ] }
+func CreateClinicSideAreasFromAreaHandler(c echo.Context) error {
+	var req services.AreaPriceRequest
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, resdto.BaseResponse{
+			IsSuccess: false,
+			Message:   "invalid payload: " + err.Error(),
+		})
+	}
+
+	// get clinic id from context (ClinicAuthMiddleware)
+	clinicIDf, ok := c.Get("clinic_id").(float64)
+	if !ok {
+		return c.JSON(http.StatusUnauthorized, resdto.BaseResponse{
+			IsSuccess: false,
+			Message:   "clinic_id not found in context",
+		})
+	}
+	clinicID := uint64(clinicIDf)
+
+	if err := services.UpsertClinicSideAreasFromAreaRequest(req, clinicID); err != nil {
+		return c.JSON(http.StatusInternalServerError, resdto.BaseResponse{
+			IsSuccess: false,
+			Message:   "failed to save clinic side areas from areas: " + err.Error(),
+		})
+	}
+
+	return c.JSON(http.StatusOK, resdto.BaseResponse{
+		IsSuccess: true,
+		Message:   "clinic side areas saved",
+	})
+}
