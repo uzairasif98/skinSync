@@ -91,6 +91,7 @@ func ConnectDB() {
 		&models.ClinicUser{},
 		&models.ClinicTreatment{},
 		&models.ClinicUserTreatment{},
+		&models.ClinicSideArea{},
 	); err != nil {
 		// attempt to close DB on migration error
 		if cerr := CloseDB(); cerr != nil {
@@ -322,6 +323,9 @@ func SeedClinicRoles() {
 		{"clinic.view", "View clinic settings"},
 		{"clinic.edit", "Edit clinic settings"},
 
+		// Area/Treatment Management
+		{"areas.edit", "Edit treatment areas and pricing"},
+
 		// Reports
 		{"reports.view", "View reports and analytics"},
 		{"reports.export", "Export reports"},
@@ -358,6 +362,7 @@ func SeedClinicRoles() {
 				"patients.view", "patients.create", "patients.edit", "patients.delete",
 				"treatment_records.view", "treatment_records.create", "treatment_records.edit",
 				"clinic.view", "clinic.edit",
+				"areas.edit",
 				"reports.view", "reports.export",
 				"profile.view", "profile.edit",
 			},
@@ -371,6 +376,7 @@ func SeedClinicRoles() {
 				"patients.view", "patients.create", "patients.edit",
 				"treatment_records.view",
 				"clinic.view",
+				"areas.edit",
 				"reports.view",
 				"profile.view", "profile.edit",
 			},
