@@ -104,6 +104,9 @@ func SetupRoutes(e *echo.Group) {
 		// Staff management (owner only)
 		clinic.POST("/users/register", controllers.RegisterClinicUserHandler, middlewares.RequireClinicPermission("staff.create"))
 
+		// Doctor/Injector registration with treatment side areas (owner only)
+		clinic.POST("/doctors/register", controllers.RegisterDoctorHandler, middlewares.RequireClinicPermission("staff.create"))
+
 		// Clinic-managed areas and prices
 		// Frontend posts side_area_id (we resolve area/treatment) and optional syringe_size for per-size prices
 		clinic.POST("/side-areas", controllers.CreateClinicSideAreasFromSideAreaHandler, middlewares.RequireClinicPermission("areas.edit"))

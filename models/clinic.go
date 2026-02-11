@@ -150,3 +150,23 @@ type ClinicSideArea struct {
 func (ClinicSideArea) TableName() string {
 	return "clinic_side_areas"
 }
+
+// ClinicUserSideArea maps which specific side areas a doctor/injector can perform at a clinic
+type ClinicUserSideArea struct {
+	ID           uint64    `gorm:"primaryKey;autoIncrement" json:"id"`
+	ClinicUserID uint64    `gorm:"not null;index:idx_user_side_area,unique" json:"clinic_user_id"`
+	ClinicID     uint64    `gorm:"not null;index:idx_user_side_area,unique" json:"clinic_id"`
+	TreatmentID  uint      `gorm:"not null;index:idx_user_side_area,unique" json:"treatment_id"`
+	AreaID       uint      `gorm:"not null;index:idx_user_side_area,unique" json:"area_id"`
+	SideAreaID   uint      `gorm:"not null;index:idx_user_side_area,unique" json:"side_area_id"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+
+	// Relationships
+	ClinicUser ClinicUser `gorm:"foreignKey:ClinicUserID;constraint:OnDelete:CASCADE" json:"-"`
+	SideArea   SideArea   `gorm:"foreignKey:SideAreaID" json:"-"`
+}
+
+func (ClinicUserSideArea) TableName() string {
+	return "clinic_user_side_areas"
+}

@@ -105,6 +105,53 @@ func RegisterClinicUserHandler(c echo.Context) error {
 	return c.JSON(http.StatusCreated, resp)
 }
 
+// RegisterDoctorHandler handles doctor/injector registration with treatment side areas
+func RegisterDoctorHandler(c echo.Context) error {
+	// Get clinic_id from context (set by ClinicAuthMiddleware)
+	clinicIDFloat, ok := c.Get("clinic_id").(float64)
+	if !ok {
+		return c.JSON(http.StatusUnauthorized, resdto.BaseResponse{
+			IsSuccess: false,
+			Message:   "clinic_id not found in context",
+		})
+	}
+	clinicID := uint64(clinicIDFloat)
+
+	var req reqdto.RegisterDoctorRequest
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, resdto.BaseResponse{
+			IsSuccess: false,
+			Message:   err.Error(),
+		})
+	}
+
+	// Validate required fields
+	if req.Role == "" || req.Name == "" || req.ContactInfo.Email == "" || len(req.Treatments) == 0 {
+		return c.JSON(http.StatusBadRequest, resdto.BaseResponse{
+			IsSuccess: false,
+			Message:   "role, name, contact_info.email, and treatments are required",
+		})
+	}
+
+	// Validate role is doctor or injector
+	if req.Role != "doctor" && req.Role != "injector" {
+		return c.JSON(http.StatusBadRequest, resdto.BaseResponse{
+			IsSuccess: false,
+			Message:   "role must be 'doctor' or 'injector'",
+		})
+	}
+
+	resp, err := services.RegisterDoctorWithTreatments(req, clinicID)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, resdto.BaseResponse{
+			IsSuccess: false,
+			Message:   err.Error(),
+		})
+	}
+
+	return c.JSON(http.StatusCreated, resp)
+}
+
 // CreateClinicSideAreasFromSideAreaHandler handles POST /clinic/side-areas
 // Body: [{ "clinic_id":1, "side_area_id":4, "price":50.0, "status":"active" }, ...]
 // Frontend sends side_area_id; handler will lookup the side-area to get area_id and treatment_id

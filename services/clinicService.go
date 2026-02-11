@@ -356,6 +356,159 @@ func RegisterClinicUser(req reqdto.RegisterClinicUserRequest, clinicID uint64) (
 	}, nil
 }
 
+// RegisterDoctorWithTreatments creates a doctor/injector and assigns them to specific side areas
+func RegisterDoctorWithTreatments(req reqdto.RegisterDoctorRequest, clinicID uint64) (*resdto.RegisterClinicUserResponse, error) {
+	db := config.DB
+	if db == nil {
+		return nil, errors.New("database not initialized")
+	}
+
+	// Map role name to role_id
+	var roleName string
+	if req.Role == "doctor" {
+		roleName = models.ClinicRoleDoctor
+	} else if req.Role == "injector" {
+		roleName = models.ClinicRoleInjector
+	} else {
+		return nil, errors.New("invalid role - must be 'doctor' or 'injector'")
+	}
+
+	// Get role ID
+	var role models.ClinicRole
+	if err := db.Where("name = ?", roleName).First(&role).Error; err != nil {
+		return nil, errors.New("role not found in database")
+	}
+
+	// Check if email already exists at THIS clinic
+	var existingUser models.ClinicUser
+	if err := db.Where("email = ? AND clinic_id = ?", req.ContactInfo.Email, clinicID).First(&existingUser).Error; err == nil {
+		return nil, errors.New("user with this email already exists at this clinic")
+	}
+
+	// Check if email exists at another clinic - reuse password
+	var existingElsewhere models.ClinicUser
+	var plainPassword string
+	var hashedPassword string
+
+	if err := db.Where("email = ?", req.ContactInfo.Email).First(&existingElsewhere).Error; err == nil {
+		// Same person at another clinic - reuse password hash
+		hashedPassword = existingElsewhere.PasswordHash
+		plainPassword = "" // Don't return password since it's the same as existing
+	} else {
+		// New user - generate password
+		var genErr error
+		plainPassword, genErr = utils.GenerateSecurePassword()
+		if genErr != nil {
+			return nil, errors.New("failed to generate password")
+		}
+		var hashErr error
+		hashedPassword, hashErr = HashPassword(plainPassword)
+		if hashErr != nil {
+			return nil, errors.New("failed to hash password")
+		}
+	}
+
+	// Start transaction
+	tx := db.Begin()
+
+	// Create clinic user
+	clinicUser := models.ClinicUser{
+		ClinicID:     clinicID,
+		Email:        req.ContactInfo.Email,
+		PasswordHash: hashedPassword,
+		Name:         req.Name,
+		RoleID:       role.ID,
+		Status:       "active",
+	}
+
+	if err := tx.Create(&clinicUser).Error; err != nil {
+		tx.Rollback()
+		return nil, errors.New("failed to create clinic user")
+	}
+
+	// Process treatments and side areas
+	var sideAreaRecords []models.ClinicUserSideArea
+
+	for _, treatment := range req.Treatments {
+		// For each side area ID in the treatment
+		for _, sideAreaID := range treatment.TreatmentsSubSecID {
+			// Lookup side area to get area_id and treatment_id
+			var sideArea models.SideArea
+			if err := tx.First(&sideArea, sideAreaID).Error; err != nil {
+				tx.Rollback()
+				return nil, fmt.Errorf("side_area id %d not found", sideAreaID)
+			}
+
+			// Verify the side area belongs to the specified treatment
+			if sideArea.TreatmentID != treatment.TreatmentID {
+				tx.Rollback()
+				return nil, fmt.Errorf("side_area %d does not belong to treatment %d", sideAreaID, treatment.TreatmentID)
+			}
+
+			// Create ClinicUserSideArea record
+			sideAreaRecord := models.ClinicUserSideArea{
+				ClinicUserID: clinicUser.ID,
+				ClinicID:     clinicID,
+				TreatmentID:  sideArea.TreatmentID,
+				AreaID:       sideArea.AreaID,
+				SideAreaID:   sideArea.ID,
+			}
+
+			sideAreaRecords = append(sideAreaRecords, sideAreaRecord)
+		}
+	}
+
+	// Batch insert side area records
+	if len(sideAreaRecords) > 0 {
+		if err := tx.Create(&sideAreaRecords).Error; err != nil {
+			tx.Rollback()
+			return nil, errors.New("failed to assign side areas to user")
+		}
+	}
+
+	// Commit transaction
+	if err := tx.Commit().Error; err != nil {
+		return nil, errors.New("failed to commit transaction")
+	}
+
+	// Get clinic name for email
+	var clinic models.Clinic
+	db.First(&clinic, clinicID)
+
+	message := "Doctor registered successfully."
+	if plainPassword != "" {
+		// New user - send email with credentials
+		emailErr := utils.SendClinicCredentialsEmail(
+			clinicUser.Email,
+			clinicUser.Name,
+			clinic.Name,
+			plainPassword,
+		)
+		message = "Doctor registered successfully. Credentials sent to email."
+		if emailErr != nil {
+			message = "Doctor registered successfully. Email sending failed - please share credentials manually."
+		}
+	} else {
+		message = "Doctor registered successfully. User already exists - same password as existing account."
+	}
+
+	return &resdto.RegisterClinicUserResponse{
+		BaseResponse: resdto.BaseResponse{
+			IsSuccess: true,
+			Message:   message,
+		},
+		Data: &resdto.RegisterClinicUserData{
+			ID:       clinicUser.ID,
+			ClinicID: clinicUser.ClinicID,
+			Email:    clinicUser.Email,
+			Name:     clinicUser.Name,
+			Role:     role.Name,
+			Password: plainPassword,
+			Status:   clinicUser.Status,
+		},
+	}, nil
+}
+
 // SideAreaPayload is the payload shape when frontend sends side_area_id
 type SideAreaPayload struct {
 	ClinicID    uint64   `json:"clinic_id"`
