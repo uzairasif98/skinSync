@@ -33,16 +33,16 @@ func SetupRoutes(e *echo.Group) {
 
 		// Public masters (onboarding only - no auth needed for initial app load)
 		public.GET("/onboarding/masters", controllers.GetOnboardingMastersHandler)
+
+		// Treatment tree APIs (public - no auth required)
+		public.GET("/treatments/masters", controllers.GetTreatmentMastersHandler)
+		public.GET("/treatments/:id/areas", controllers.GetAreasHandler)
+		public.GET("/treatments/:treatmentId/areas/:areaId/sideareas", controllers.GetSideAreasHandler)
 	}
 
 	// ========== UNIFIED AUTH ROUTES (Any valid token: customer/admin/clinic) ==========
 	unified := e.Group("", middlewares.UnifiedAuthMiddleware)
 	{
-		// Treatment viewing (any authenticated user)
-		unified.GET("/treatments/masters", controllers.GetTreatmentMastersHandler)
-		unified.GET("/treatments/:id/areas", controllers.GetAreasHandler)
-		unified.GET("/treatments/:treatmentId/areas/:areaId/sideareas", controllers.GetSideAreasHandler)
-
 		// Discovery APIs (Clinic ↔ Treatment ↔ Doctor)
 		unified.GET("/clinics", controllers.GetAllClinicsHandler)
 		unified.GET("/doctors", controllers.GetAllDoctorsHandler)
