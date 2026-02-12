@@ -19,7 +19,8 @@ func main() {
 	e := echo.New()
 	e.Binder = &middlewares.CustomBinder{}
 
-	// Middleware for panic recover
+	// Middleware
 	e.Use(middleware.Recover())
+	e.Use(middlewares.CORSMiddleware())
 	router.RequestHandler(e)
 }
