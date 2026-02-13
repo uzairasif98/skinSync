@@ -751,3 +751,13 @@ func GetTreatmentByClinic(clinicID uint64) (resdto.GetClinicTreatmentsResponse, 
 		Data:         treatmentDTOs,
 	}, nil
 }
+
+// GetClinicRoles returns all clinic roles
+func GetClinicRoles() ([]models.ClinicRole, error) {
+	db := config.DB
+	var roles []models.ClinicRole
+	if err := db.Find(&roles).Error; err != nil {
+		return nil, err
+	}
+	return roles, nil
+}

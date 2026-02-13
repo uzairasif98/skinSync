@@ -244,6 +244,23 @@ func GetSideAreasByTreatmentHandler(c echo.Context) error {
 	return c.JSON(http.StatusOK, resp)
 }
 
+// GetClinicRolesHandler handles GET /clinic/roles
+func GetClinicRolesHandler(c echo.Context) error {
+	roles, err := services.GetClinicRoles()
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, resdto.BaseResponse{
+			IsSuccess: false,
+			Message:   "Failed to fetch roles",
+		})
+	}
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"is_success": true,
+		"message":    "Roles retrieved successfully",
+		"data":       roles,
+	})
+}
+
 // GetTreatmentsByClinicHandler handles GET /clinic/treatments
 func GetTreatmentByClinicHandler(c echo.Context) error {
 	// Get clinic_id from context (set by ClinicAuthMiddleware)
