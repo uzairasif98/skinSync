@@ -558,60 +558,95 @@ func UpsertClinicSideAreasFromSideArea(payload []SideAreaPayload) error {
 
 // (Removed separate syringe price upsert) Use UpsertClinicSideAreasFromSideArea with SyringeSize to store per-size prices in clinic_side_areas.
 
-// AreaPriceItem represents price info sent per area by FE
-type AreaPriceItem struct {
-	AreaID uint     `json:"area_id"`
-	Price  *float64 `json:"price,omitempty"`
-	// optional syringe size if FE wants to set per-size price for all side areas
-	SyringeSize int `json:"syringe_size,omitempty"`
+// SideAreaPriceItem represents price info sent per side area by FE
+type SideAreaPriceItem struct {
+	SideAreaID  uint     `json:"side_area_id"`
+	Price       *float64 `json:"price,omitempty"`
+	SyringeSize int      `json:"syringe_size,omitempty"`
 }
 
-// AreaPriceRequest is the payload shape FE will send
-type AreaPriceRequest struct {
-	TreatmentID uint            `json:"treatment_id"`
-	Areas       []AreaPriceItem `json:"area"`
+// BulkSideAreaRequest is the payload shape FE will send
+type BulkSideAreaRequest struct {
+	TreatmentID uint                `json:"treatment_id"`
+	SideAreas   []SideAreaPriceItem `json:"side_area"`
 }
 
-// UpsertClinicSideAreasFromAreaRequest accepts a payload where FE sends treatment_id and a list
-// of areas with prices. For each area it finds all SideAreas and upserts ClinicSideArea rows
-// (one row per SideArea). SyringeSize from the item is applied to all side areas (0 if omitted).
-func UpsertClinicSideAreasFromAreaRequest(req AreaPriceRequest, clinicID uint64) error {
-	if len(req.Areas) == 0 {
-		return nil
+// BulkSideAreaResponseItem represents a side area in the response
+type BulkSideAreaResponseItem struct {
+	ID              uint     `json:"id"`
+	Name            string   `json:"name"`
+	PerSyringePrice *float64 `json:"per_syringe_price,omitempty"`
+}
+
+// BulkSideAreaResponse represents the response for bulk side area upsert
+type BulkSideAreaResponse struct {
+	ID          uint                       `json:"id"`
+	Name        string                     `json:"name"`
+	Description string                     `json:"description,omitempty"`
+	SideAreas   []BulkSideAreaResponseItem `json:"side_areas"`
+}
+
+// UpsertClinicSideAreasBulk accepts a payload with one treatment and bulk side areas.
+// Looks up each side_area to get area_id, upserts into clinic_side_areas, and returns
+// treatment + side area details with names.
+func UpsertClinicSideAreasBulk(req BulkSideAreaRequest, clinicID uint64) (*BulkSideAreaResponse, error) {
+	if len(req.SideAreas) == 0 {
+		return nil, fmt.Errorf("side_area list is empty")
 	}
 	db := config.DB
 
+	// Get treatment details
+	var treatment models.Treatment
+	if err := db.First(&treatment, req.TreatmentID).Error; err != nil {
+		return nil, fmt.Errorf("treatment id %d not found", req.TreatmentID)
+	}
+
 	var rows []models.ClinicSideArea
-	for _, it := range req.Areas {
-		var sideAreas []models.SideArea
-		if err := db.Where("treatment_id = ? AND area_id = ?", req.TreatmentID, it.AreaID).Find(&sideAreas).Error; err != nil {
-			return err
+	var responseItems []BulkSideAreaResponseItem
+
+	for _, it := range req.SideAreas {
+		var sideArea models.SideArea
+		if err := db.First(&sideArea, it.SideAreaID).Error; err != nil {
+			return nil, fmt.Errorf("side_area id %d not found", it.SideAreaID)
 		}
 
-		for _, sa := range sideAreas {
-			row := models.ClinicSideArea{
-				ClinicID:    uint(clinicID),
-				TreatmentID: sa.TreatmentID,
-				AreaID:      sa.AreaID,
-				SideAreaID:  sa.ID,
-				SyringeSize: it.SyringeSize,
-				Price:       it.Price,
-				Status:      "active",
-				CreatedAt:   time.Now(),
-				UpdatedAt:   time.Now(),
-			}
-			rows = append(rows, row)
+		if sideArea.TreatmentID != req.TreatmentID {
+			return nil, fmt.Errorf("side_area %d does not belong to treatment %d", it.SideAreaID, req.TreatmentID)
 		}
+
+		row := models.ClinicSideArea{
+			ClinicID:    uint(clinicID),
+			TreatmentID: sideArea.TreatmentID,
+			AreaID:      sideArea.AreaID,
+			SideAreaID:  sideArea.ID,
+			SyringeSize: it.SyringeSize,
+			Price:       it.Price,
+			Status:      "active",
+			CreatedAt:   time.Now(),
+			UpdatedAt:   time.Now(),
+		}
+		rows = append(rows, row)
+
+		responseItems = append(responseItems, BulkSideAreaResponseItem{
+			ID:              sideArea.ID,
+			Name:            sideArea.Name,
+			PerSyringePrice: it.Price,
+		})
 	}
 
-	if len(rows) == 0 {
-		return nil
-	}
-
-	return db.Clauses(clause.OnConflict{
+	if err := db.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "clinic_id"}, {Name: "treatment_id"}, {Name: "area_id"}, {Name: "side_area_id"}, {Name: "syringe_size"}},
 		DoUpdates: clause.AssignmentColumns([]string{"price", "status", "updated_at"}),
-	}).Create(&rows).Error
+	}).Create(&rows).Error; err != nil {
+		return nil, err
+	}
+
+	return &BulkSideAreaResponse{
+		ID:          treatment.ID,
+		Name:        treatment.Name,
+		Description: treatment.Description,
+		SideAreas:   responseItems,
+	}, nil
 }
 
 // GetSideAreasByTreatment returns all side areas for a given treatment ID
@@ -657,98 +692,66 @@ func GetSideAreasByTreatment(treatmentID uint) (resdto.SideAreasResponse, error)
 }
 
 // GetTreatmentsByClinic returns all treatments offered by a clinic with their side area prices
-func GetTreatmentByClinic(clinicID uint64) (resdto.GetClinicTreatmentsResponse, error) {
+func GetTreatmentByClinic(clinicID uint64) (map[string]interface{}, error) {
 	db := config.DB
 
-	// Get all clinic treatments
-	var clinicTreatments []models.ClinicTreatment
-	err := db.Where("clinic_id = ? AND status = ?", clinicID, "active").
-		Preload("Treatment").
-		Find(&clinicTreatments).Error
-	if err != nil {
-		return resdto.GetClinicTreatmentsResponse{
-			BaseResponse: resdto.BaseResponse{IsSuccess: false, Message: "Failed to fetch treatments"},
-		}, err
+	// Get all clinic_side_areas for this clinic
+	var clinicSideAreas []models.ClinicSideArea
+	if err := db.Where("clinic_id = ? AND status = ?", clinicID, "active").
+		Find(&clinicSideAreas).Error; err != nil {
+		return nil, err
 	}
 
-	var treatmentDTOs []resdto.ClinicTreatmentDTO
+	if len(clinicSideAreas) == 0 {
+		return map[string]interface{}{
+			"is_success": true,
+			"message":    "Treatments retrieved successfully",
+			"data":       []BulkSideAreaResponse{},
+		}, nil
+	}
 
-	// For each treatment, get areas and side areas with prices
-	for _, ct := range clinicTreatments {
-		// Get areas for this treatment
-		var areas []models.Area
-		err := db.Where("treatment_id = ?", ct.TreatmentID).Find(&areas).Error
-		if err != nil {
+	// Group side areas by treatment_id
+	treatmentMap := make(map[uint][]models.ClinicSideArea)
+	for _, csa := range clinicSideAreas {
+		treatmentMap[csa.TreatmentID] = append(treatmentMap[csa.TreatmentID], csa)
+	}
+
+	var treatments []BulkSideAreaResponse
+
+	for treatmentID, sideAreaRows := range treatmentMap {
+		// Get treatment details
+		var treatment models.Treatment
+		if err := db.First(&treatment, treatmentID).Error; err != nil {
 			continue
 		}
 
-		var areaDTOs []resdto.ClinicAreaDTO
-
-		for _, area := range areas {
-			// Get side areas with clinic prices
-			var clinicSideAreas []models.ClinicSideArea
-			err := db.Where("clinic_id = ? AND treatment_id = ? AND area_id = ? AND status = ?",
-				clinicID, ct.TreatmentID, area.ID, "active").
-				Find(&clinicSideAreas).Error
-			if err != nil {
+		var sideAreas []BulkSideAreaResponseItem
+		for _, csa := range sideAreaRows {
+			// Get side area name
+			var sideArea models.SideArea
+			if err := db.First(&sideArea, csa.SideAreaID).Error; err != nil {
 				continue
 			}
 
-			var sideAreaDTOs []resdto.ClinicSideAreaPriceDTO
-
-			for _, csa := range clinicSideAreas {
-				// Get side area details
-				var sideArea models.SideArea
-				err := db.Where("id = ?", csa.SideAreaID).First(&sideArea).Error
-				if err != nil {
-					continue
-				}
-
-				// Generate syringe options
-				var syringeOptions []int
-				for i := sideArea.MinSyringe; i <= sideArea.MaxSyringe; i++ {
-					syringeOptions = append(syringeOptions, i)
-				}
-
-				sideAreaDTOs = append(sideAreaDTOs, resdto.ClinicSideAreaPriceDTO{
-					ID:          csa.ID,
-					SideAreaID:  sideArea.ID,
-					Name:        sideArea.Name,
-					Icon:        sideArea.Icon,
-					Description: sideArea.Description,
-					MinSyringe:  sideArea.MinSyringe,
-					MaxSyringe:  sideArea.MaxSyringe,
-					Price:       csa.Price,
-					Status:      csa.Status,
-				})
-			}
-
-			if len(sideAreaDTOs) > 0 {
-				areaDTOs = append(areaDTOs, resdto.ClinicAreaDTO{
-					ID:          area.ID,
-					AreaID:      area.ID,
-					Name:        area.Name,
-					Icon:        area.Icon,
-					Description: area.Description,
-					SideAreas:   sideAreaDTOs,
-				})
-			}
+			sideAreas = append(sideAreas, BulkSideAreaResponseItem{
+				ID:              sideArea.ID,
+				Name:            sideArea.Name,
+				PerSyringePrice: csa.Price,
+			})
 		}
 
-		treatmentDTOs = append(treatmentDTOs, resdto.ClinicTreatmentDTO{
-			ID:          ct.TreatmentID,
-			Name:        ct.Treatment.Name,
-			Icon:        ct.Treatment.Icon,
-			Description: ct.Treatment.Description,
-			Price:       ct.Price,
-			Areas:       areaDTOs,
-			Status:      ct.Status,
+		treatments = append(treatments, BulkSideAreaResponse{
+			ID:          treatment.ID,
+			Name:        treatment.Name,
+			Description: treatment.Description,
+			SideAreas:   sideAreas,
 		})
 	}
 
-	return resdto.GetClinicTreatmentsResponse{
-		BaseResponse: resdto.BaseResponse{IsSuccess: true, Message: "Treatments retrieved successfully"},
-		Data:         treatmentDTOs,
+	return map[string]interface{}{
+		"is_success": true,
+		"message":    "Treatments retrieved successfully",
+		"data":       treatments,
 	}, nil
 }
 

@@ -46,7 +46,6 @@ func SetupRoutes(e *echo.Group) {
 		// Discovery APIs (Clinic ↔ Treatment ↔ Doctor)
 		unified.GET("/clinics", controllers.GetAllClinicsHandler)
 		unified.GET("/doctors", controllers.GetAllDoctorsHandler)
-		unified.GET("/clinics/:clinicId/treatments", controllers.GetTreatmentsByClinicHandler)
 		unified.GET("/treatments/:treatmentId/clinics", controllers.GetClinicsByTreatmentHandler)
 		unified.GET("/doctors/:doctorId/treatments", controllers.GetTreatmentsByDoctorHandler)
 		unified.GET("/clinics/:clinicId/treatments/:treatmentId/doctors", controllers.GetDoctorsByClinicAndTreatmentHandler)

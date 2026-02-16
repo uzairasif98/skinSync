@@ -189,9 +189,9 @@ func CreateClinicSideAreasFromSideAreaHandler(c echo.Context) error {
 }
 
 // CreateClinicSideAreasFromAreaHandler handles POST /clinic/side-areas/bulk
-// Body: { "treatment_id":51, "area": [ { "area_id":1, "price":75.0 }, ... ] }
+// Body: { "treatments": [ { "treatment_id":6, "side_area": [ { "side_area_id":8, "price":150.0 }, ... ] }, ... ] }
 func CreateClinicSideAreasFromAreaHandler(c echo.Context) error {
-	var req services.AreaPriceRequest
+	var req services.BulkSideAreaRequest
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, resdto.BaseResponse{
 			IsSuccess: false,
@@ -209,16 +209,18 @@ func CreateClinicSideAreasFromAreaHandler(c echo.Context) error {
 	}
 	clinicID := uint64(clinicIDf)
 
-	if err := services.UpsertClinicSideAreasFromAreaRequest(req, clinicID); err != nil {
+	resp, err := services.UpsertClinicSideAreasBulk(req, clinicID)
+	if err != nil {
 		return c.JSON(http.StatusInternalServerError, resdto.BaseResponse{
 			IsSuccess: false,
-			Message:   "failed to save clinic side areas from areas: " + err.Error(),
+			Message:   "failed to save clinic side areas: " + err.Error(),
 		})
 	}
 
-	return c.JSON(http.StatusOK, resdto.BaseResponse{
-		IsSuccess: true,
-		Message:   "clinic side areas saved",
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"is_success": true,
+		"message":    "clinic side areas saved",
+		"data":       resp,
 	})
 }
 
@@ -261,7 +263,7 @@ func GetClinicRolesHandler(c echo.Context) error {
 	})
 }
 
-// GetTreatmentsByClinicHandler handles GET /clinic/treatments
+// GetTreatmentByClinicHandler handles GET /clinic/treatments
 func GetTreatmentByClinicHandler(c echo.Context) error {
 	// Get clinic_id from context (set by ClinicAuthMiddleware)
 	clinicIDFloat, ok := c.Get("clinic_id").(float64)
@@ -275,11 +277,9 @@ func GetTreatmentByClinicHandler(c echo.Context) error {
 
 	resp, err := services.GetTreatmentByClinic(clinicID)
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, resdto.GetClinicTreatmentsResponse{
-			BaseResponse: resdto.BaseResponse{
-				IsSuccess: false,
-				Message:   "Failed to fetch treatments",
-			},
+		return c.JSON(http.StatusInternalServerError, resdto.BaseResponse{
+			IsSuccess: false,
+			Message:   "Failed to fetch treatments",
 		})
 	}
 
