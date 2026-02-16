@@ -567,8 +567,9 @@ type SideAreaPriceItem struct {
 
 // BulkSideAreaRequest is the payload shape FE will send
 type BulkSideAreaRequest struct {
-	TreatmentID uint                `json:"treatment_id"`
-	SideAreas   []SideAreaPriceItem `json:"side_area"`
+	TreatmentID    uint                `json:"treatment_id"`
+	TreatmentPrice float64             `json:"treatment_price"`
+	SideAreas      []SideAreaPriceItem `json:"side_area"`
 }
 
 // BulkSideAreaResponseItem represents a side area in the response
@@ -583,6 +584,7 @@ type BulkSideAreaResponse struct {
 	ID          uint                       `json:"id"`
 	Name        string                     `json:"name"`
 	Description string                     `json:"description,omitempty"`
+	Price       float64                    `json:"treatment_price"`
 	SideAreas   []BulkSideAreaResponseItem `json:"side_areas"`
 }
 
@@ -594,7 +596,28 @@ func UpsertClinicSideAreasBulk(req BulkSideAreaRequest, clinicID uint64) (*BulkS
 		return nil, fmt.Errorf("side_area list is empty")
 	}
 	db := config.DB
-
+	// Upsert treatment price in clinic_treatments
+	if req.TreatmentPrice != 0.0 {
+		var ct models.ClinicTreatment
+		err := db.Where("clinic_id = ? AND treatment_id = ?", clinicID, req.TreatmentID).
+			First(&ct).Error
+		if err == nil {
+			// Update price
+			ct.Price = &req.TreatmentPrice
+			ct.Status = "active"
+			db.Save(&ct)
+		} else if err == gorm.ErrRecordNotFound {
+			// Insert new record
+			ct = models.ClinicTreatment{
+				ClinicID:    clinicID,
+				TreatmentID: req.TreatmentID,
+				Price:       &req.TreatmentPrice,
+				Status:      "active",
+			}
+			db.Create(&ct)
+		}
+		// else: ignore other errors for now
+	}
 	// Get treatment details
 	var treatment models.Treatment
 	if err := db.First(&treatment, req.TreatmentID).Error; err != nil {
@@ -691,18 +714,19 @@ func GetSideAreasByTreatment(treatmentID uint) (resdto.SideAreasResponse, error)
 	}, nil
 }
 
-// GetTreatmentsByClinic returns all treatments offered by a clinic with their side area prices
+// // GetTreatmentsByClinic returns all treatments offered by a clinic with their side area prices
 func GetTreatmentByClinic(clinicID uint64) (map[string]interface{}, error) {
 	db := config.DB
 
-	// Get all clinic_side_areas for this clinic
-	var clinicSideAreas []models.ClinicSideArea
+	// Get all clinic treatments assigned to this clinic
+	var clinicTreatments []models.ClinicTreatment
 	if err := db.Where("clinic_id = ? AND status = ?", clinicID, "active").
-		Find(&clinicSideAreas).Error; err != nil {
+		Preload("Treatment").
+		Find(&clinicTreatments).Error; err != nil {
 		return nil, err
 	}
 
-	if len(clinicSideAreas) == 0 {
+	if len(clinicTreatments) == 0 {
 		return map[string]interface{}{
 			"is_success": true,
 			"message":    "Treatments retrieved successfully",
@@ -710,29 +734,23 @@ func GetTreatmentByClinic(clinicID uint64) (map[string]interface{}, error) {
 		}, nil
 	}
 
-	// Group side areas by treatment_id
-	treatmentMap := make(map[uint][]models.ClinicSideArea)
-	for _, csa := range clinicSideAreas {
-		treatmentMap[csa.TreatmentID] = append(treatmentMap[csa.TreatmentID], csa)
-	}
-
 	var treatments []BulkSideAreaResponse
 
-	for treatmentID, sideAreaRows := range treatmentMap {
-		// Get treatment details
-		var treatment models.Treatment
-		if err := db.First(&treatment, treatmentID).Error; err != nil {
+	for _, ct := range clinicTreatments {
+		// Get all side areas for this treatment and clinic
+		var clinicSideAreas []models.ClinicSideArea
+		if err := db.Where("clinic_id = ? AND treatment_id = ? AND status = ?", clinicID, ct.TreatmentID, "active").
+			Find(&clinicSideAreas).Error; err != nil {
 			continue
 		}
 
 		var sideAreas []BulkSideAreaResponseItem
-		for _, csa := range sideAreaRows {
+		for _, csa := range clinicSideAreas {
 			// Get side area name
 			var sideArea models.SideArea
 			if err := db.First(&sideArea, csa.SideAreaID).Error; err != nil {
 				continue
 			}
-
 			sideAreas = append(sideAreas, BulkSideAreaResponseItem{
 				ID:              sideArea.ID,
 				Name:            sideArea.Name,
@@ -741,10 +759,17 @@ func GetTreatmentByClinic(clinicID uint64) (map[string]interface{}, error) {
 		}
 
 		treatments = append(treatments, BulkSideAreaResponse{
-			ID:          treatment.ID,
-			Name:        treatment.Name,
-			Description: treatment.Description,
-			SideAreas:   sideAreas,
+			ID:          ct.Treatment.ID,
+			Name:        ct.Treatment.Name,
+			Description: ct.Treatment.Description,
+			Price: func() float64 {
+				if ct.Price != nil {
+					return *ct.Price
+				} else {
+					return 0
+				}
+			}(),
+			SideAreas: sideAreas,
 		})
 	}
 
