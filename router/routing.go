@@ -115,6 +115,10 @@ func SetupRoutes(e *echo.Group) {
 
 		// Bulk upsert: frontend sends treatment_id + area list
 		clinic.POST("/side-areas/bulk", controllers.CreateClinicSideAreasFromAreaHandler, middlewares.RequireClinicPermission("areas.edit"))
+
+		// Update side areas (bulk sync): full replace for a treatment - adds new, updates existing, removes missing
+		clinic.PATCH("/side-areas/bulk", controllers.UpdateClinicSideAreasBulkHandler, middlewares.RequireClinicPermission("areas.edit"))
+
 		// Get side areas by treatment ID
 		clinic.GET("/side-areas/treatment/:treatmentId", controllers.GetSideAreasByTreatmentHandler)
 		// Get all clinic roles

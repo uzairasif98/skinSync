@@ -3,6 +3,7 @@ package controllers
 import (
 	"net/http"
 	"strconv"
+	"strings"
 
 	reqdto "skinSync/dto/request"
 	resdto "skinSync/dto/response"
@@ -209,18 +210,94 @@ func CreateClinicSideAreasFromAreaHandler(c echo.Context) error {
 	}
 	clinicID := uint64(clinicIDf)
 
-	resp, err := services.UpsertClinicSideAreasBulk(req, clinicID)
+	resp, err := services.CreateClinicSideAreasBulk(req, clinicID)
+	if err != nil {
+		// Check if it's an "already exists" error
+		errMsg := err.Error()
+		if strings.Contains(errMsg, "already exists") {
+			return c.JSON(http.StatusConflict, resdto.BaseResponse{
+				IsSuccess: false,
+				Message:   errMsg,
+			})
+		}
+		return c.JSON(http.StatusInternalServerError, resdto.BaseResponse{
+			IsSuccess: false,
+			Message:   "failed to save clinic side areas: " + errMsg,
+		})
+	}
+
+	return c.JSON(http.StatusCreated, map[string]interface{}{
+		"is_success": true,
+		"message":    "clinic side areas created",
+		"data":       resp,
+	})
+}
+
+// UpdateClinicSideAreasBulkHandler handles PUT /clinic/side-areas/bulk
+// Full sync: updates existing, adds new, removes side areas not in the request
+func UpdateClinicSideAreasBulkHandler(c echo.Context) error {
+	var req services.BulkSideAreaRequest
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, resdto.BaseResponse{
+			IsSuccess: false,
+			Message:   "invalid payload: " + err.Error(),
+		})
+	}
+
+	clinicIDf, ok := c.Get("clinic_id").(float64)
+	if !ok {
+		return c.JSON(http.StatusUnauthorized, resdto.BaseResponse{
+			IsSuccess: false,
+			Message:   "clinic_id not found in context",
+		})
+	}
+	clinicID := uint64(clinicIDf)
+
+	resp, err := services.UpdateClinicSideAreasBulk(req, clinicID)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, resdto.BaseResponse{
 			IsSuccess: false,
-			Message:   "failed to save clinic side areas: " + err.Error(),
+			Message:   "failed to update clinic side areas: " + err.Error(),
 		})
 	}
 
 	return c.JSON(http.StatusOK, map[string]interface{}{
 		"is_success": true,
-		"message":    "clinic side areas saved",
+		"message":    "clinic side areas updated",
 		"data":       resp,
+	})
+}
+
+// UpdateClinicSideAreasHandler handles PUT /clinic/side-areas
+// Updates price/status of individual side area records
+func UpdateClinicSideAreasHandler(c echo.Context) error {
+	var payload []services.UpdateSideAreaPayload
+	if err := c.Bind(&payload); err != nil {
+		return c.JSON(http.StatusBadRequest, resdto.BaseResponse{
+			IsSuccess: false,
+			Message:   "invalid payload: " + err.Error(),
+		})
+	}
+
+	clinicIDf, ok := c.Get("clinic_id").(float64)
+	if !ok {
+		return c.JSON(http.StatusUnauthorized, resdto.BaseResponse{
+			IsSuccess: false,
+			Message:   "clinic_id not found in context",
+		})
+	}
+	clinicID := uint64(clinicIDf)
+
+	if err := services.UpdateClinicSideAreasIndividual(payload, clinicID); err != nil {
+		return c.JSON(http.StatusInternalServerError, resdto.BaseResponse{
+			IsSuccess: false,
+			Message:   "failed to update: " + err.Error(),
+		})
+	}
+
+	return c.JSON(http.StatusOK, resdto.BaseResponse{
+		IsSuccess: true,
+		Message:   "clinic side areas updated",
 	})
 }
 

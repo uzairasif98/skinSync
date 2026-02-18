@@ -588,42 +588,164 @@ type BulkSideAreaResponse struct {
 	SideAreas   []BulkSideAreaResponseItem `json:"side_areas"`
 }
 
-// UpsertClinicSideAreasBulk accepts a payload with one treatment and bulk side areas.
-// Looks up each side_area to get area_id, upserts into clinic_side_areas, and returns
-// treatment + side area details with names.
-func UpsertClinicSideAreasBulk(req BulkSideAreaRequest, clinicID uint64) (*BulkSideAreaResponse, error) {
+// CreateClinicSideAreasBulk creates a treatment with side areas for a clinic.
+// Returns error if the treatment already exists for this clinic or if any side area already exists.
+func CreateClinicSideAreasBulk(req BulkSideAreaRequest, clinicID uint64) (*BulkSideAreaResponse, error) {
 	if len(req.SideAreas) == 0 {
 		return nil, fmt.Errorf("side_area list is empty")
 	}
 	db := config.DB
-	// Upsert treatment price in clinic_treatments
-	if req.TreatmentPrice != 0.0 {
-		var ct models.ClinicTreatment
-		err := db.Where("clinic_id = ? AND treatment_id = ?", clinicID, req.TreatmentID).
-			First(&ct).Error
-		if err == nil {
-			// Update price
-			ct.Price = &req.TreatmentPrice
-			ct.Status = "active"
-			db.Save(&ct)
-		} else if err == gorm.ErrRecordNotFound {
-			// Insert new record
-			ct = models.ClinicTreatment{
-				ClinicID:    clinicID,
-				TreatmentID: req.TreatmentID,
-				Price:       &req.TreatmentPrice,
-				Status:      "active",
-			}
-			db.Create(&ct)
-		}
-		// else: ignore other errors for now
+
+	// Check if treatment already exists for this clinic
+	var existingCT models.ClinicTreatment
+	if err := db.Where("clinic_id = ? AND treatment_id = ?", clinicID, req.TreatmentID).
+		First(&existingCT).Error; err == nil {
+		return nil, fmt.Errorf("treatment already exists for this clinic")
 	}
+
 	// Get treatment details
 	var treatment models.Treatment
 	if err := db.First(&treatment, req.TreatmentID).Error; err != nil {
 		return nil, fmt.Errorf("treatment id %d not found", req.TreatmentID)
 	}
 
+	// Check if any side areas already exist for this clinic+treatment
+	for _, it := range req.SideAreas {
+		var existing models.ClinicSideArea
+		if err := db.Where("clinic_id = ? AND treatment_id = ? AND side_area_id = ?",
+			clinicID, req.TreatmentID, it.SideAreaID).First(&existing).Error; err == nil {
+			return nil, fmt.Errorf("side_area %d already exists for this clinic and treatment", it.SideAreaID)
+		}
+	}
+
+	// Create treatment in clinic_treatments
+	ct := models.ClinicTreatment{
+		ClinicID:    clinicID,
+		TreatmentID: req.TreatmentID,
+		Status:      "active",
+	}
+	if req.TreatmentPrice != 0.0 {
+		ct.Price = &req.TreatmentPrice
+	}
+	if err := db.Create(&ct).Error; err != nil {
+		return nil, fmt.Errorf("failed to create clinic treatment: %w", err)
+	}
+
+	var treatmentPrice float64
+	if ct.Price != nil {
+		treatmentPrice = *ct.Price
+	}
+
+	// Create side areas
+	var rows []models.ClinicSideArea
+	var responseItems []BulkSideAreaResponseItem
+
+	for _, it := range req.SideAreas {
+		var sideArea models.SideArea
+		if err := db.First(&sideArea, it.SideAreaID).Error; err != nil {
+			return nil, fmt.Errorf("side_area id %d not found", it.SideAreaID)
+		}
+
+		if sideArea.TreatmentID != req.TreatmentID {
+			return nil, fmt.Errorf("side_area %d does not belong to treatment %d", it.SideAreaID, req.TreatmentID)
+		}
+
+		row := models.ClinicSideArea{
+			ClinicID:    uint(clinicID),
+			TreatmentID: sideArea.TreatmentID,
+			AreaID:      sideArea.AreaID,
+			SideAreaID:  sideArea.ID,
+			SyringeSize: it.SyringeSize,
+			Price:       it.Price,
+			Status:      "active",
+			CreatedAt:   time.Now(),
+			UpdatedAt:   time.Now(),
+		}
+		rows = append(rows, row)
+
+		responseItems = append(responseItems, BulkSideAreaResponseItem{
+			ID:              sideArea.ID,
+			Name:            sideArea.Name,
+			PerSyringePrice: it.Price,
+		})
+	}
+
+	if err := db.Create(&rows).Error; err != nil {
+		return nil, err
+	}
+
+	return &BulkSideAreaResponse{
+		ID:          treatment.ID,
+		Name:        treatment.Name,
+		Description: treatment.Description,
+		Price:       treatmentPrice,
+		SideAreas:   responseItems,
+	}, nil
+}
+
+// UpdateClinicSideAreasBulk does a full sync for a treatment:
+// - Updates price for side areas in the request
+// - Adds new side areas not yet in the DB
+// - Removes side areas from DB that are NOT in the request (for that treatment + clinic)
+func UpdateClinicSideAreasBulk(req BulkSideAreaRequest, clinicID uint64) (*BulkSideAreaResponse, error) {
+	if req.TreatmentID == 0 {
+		return nil, fmt.Errorf("treatment_id is required")
+	}
+	db := config.DB
+
+	// Upsert treatment in clinic_treatments (always, so no duplicate rows)
+	ct := models.ClinicTreatment{
+		ClinicID:    clinicID,
+		TreatmentID: req.TreatmentID,
+		Status:      "active",
+	}
+	if req.TreatmentPrice != 0.0 {
+		ct.Price = &req.TreatmentPrice
+	}
+	if err := db.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "clinic_id"}, {Name: "treatment_id"}},
+		DoUpdates: clause.AssignmentColumns([]string{"price", "status", "updated_at"}),
+	}).Create(&ct).Error; err != nil {
+		return nil, fmt.Errorf("failed to upsert clinic treatment: %w", err)
+	}
+
+	// Fetch the saved treatment price from DB to return in response
+	var savedCT models.ClinicTreatment
+	db.Where("clinic_id = ? AND treatment_id = ?", clinicID, req.TreatmentID).First(&savedCT)
+	var treatmentPrice float64
+	if savedCT.Price != nil {
+		treatmentPrice = *savedCT.Price
+	}
+
+	// Get treatment details
+	var treatment models.Treatment
+	if err := db.First(&treatment, req.TreatmentID).Error; err != nil {
+		return nil, fmt.Errorf("treatment id %d not found", req.TreatmentID)
+	}
+
+	// Delete side areas for this clinic+treatment that are NOT in the request
+	if len(req.SideAreas) > 0 {
+		ids := make([]uint, 0, len(req.SideAreas))
+		for _, it := range req.SideAreas {
+			ids = append(ids, it.SideAreaID)
+		}
+		db.Where("clinic_id = ? AND treatment_id = ? AND side_area_id NOT IN ?", clinicID, req.TreatmentID, ids).
+			Delete(&models.ClinicSideArea{})
+	} else {
+		// If empty list, remove all side areas for this treatment
+		db.Where("clinic_id = ? AND treatment_id = ?", clinicID, req.TreatmentID).
+			Delete(&models.ClinicSideArea{})
+
+		return &BulkSideAreaResponse{
+			ID:          treatment.ID,
+			Name:        treatment.Name,
+			Description: treatment.Description,
+			Price:       treatmentPrice,
+			SideAreas:   []BulkSideAreaResponseItem{},
+		}, nil
+	}
+
+	// Upsert the requested side areas
 	var rows []models.ClinicSideArea
 	var responseItems []BulkSideAreaResponseItem
 
@@ -668,8 +790,51 @@ func UpsertClinicSideAreasBulk(req BulkSideAreaRequest, clinicID uint64) (*BulkS
 		ID:          treatment.ID,
 		Name:        treatment.Name,
 		Description: treatment.Description,
+		Price:       treatmentPrice,
 		SideAreas:   responseItems,
 	}, nil
+}
+
+// UpdateSideAreaPayload is the payload for updating individual side areas
+type UpdateSideAreaPayload struct {
+	SideAreaID  uint     `json:"side_area_id" validate:"required"`
+	Price       *float64 `json:"price,omitempty"`
+	SyringeSize *int     `json:"syringe_size,omitempty"`
+	Status      string   `json:"status,omitempty"`
+}
+
+// UpdateClinicSideAreasIndividual updates price/status for individual clinic side areas
+func UpdateClinicSideAreasIndividual(payload []UpdateSideAreaPayload, clinicID uint64) error {
+	if len(payload) == 0 {
+		return fmt.Errorf("payload is empty")
+	}
+	db := config.DB
+
+	for _, p := range payload {
+		query := db.Model(&models.ClinicSideArea{}).
+			Where("clinic_id = ? AND side_area_id = ?", clinicID, p.SideAreaID)
+
+		updates := map[string]interface{}{
+			"updated_at": time.Now(),
+		}
+
+		if p.Price != nil {
+			updates["price"] = *p.Price
+		}
+		if p.Status != "" {
+			updates["status"] = p.Status
+		}
+		if p.SyringeSize != nil {
+			query = query.Where("syringe_size = ?", *p.SyringeSize)
+		}
+
+		result := query.Updates(updates)
+		if result.RowsAffected == 0 {
+			return fmt.Errorf("clinic side area with side_area_id %d not found for this clinic", p.SideAreaID)
+		}
+	}
+
+	return nil
 }
 
 // GetSideAreasByTreatment returns all side areas for a given treatment ID
