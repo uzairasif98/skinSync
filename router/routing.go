@@ -31,6 +31,10 @@ func SetupRoutes(e *echo.Group) {
 		// Clinic login (Email + Password) - Login is public, Register by super_admin
 		public.POST("/clinic/login", controllers.ClinicLoginHandler)
 
+		// Clinic password reset (public - no auth needed)
+		public.POST("/clinic/forgot-password", controllers.ClinicForgotPasswordHandler)
+		public.POST("/clinic/reset-password", controllers.ClinicResetPasswordHandler)
+
 		// Public masters (onboarding only - no auth needed for initial app load)
 		public.GET("/onboarding/masters", controllers.GetOnboardingMastersHandler)
 
@@ -125,6 +129,10 @@ func SetupRoutes(e *echo.Group) {
 		clinic.GET("/roles", controllers.GetClinicRolesHandler)
 		// Get treatments with side area prices for clinic
 		clinic.GET("/treatments", controllers.GetTreatmentByClinicHandler)
+
+		// Change password (requires auth)
+		clinic.POST("/change-password", controllers.ClinicChangePasswordHandler)
+
 		// TODO: Add more clinic endpoints
 		// clinic.GET("/profile/me", controllers.GetClinicUserProfileHandler, middlewares.RequireClinicPermission("profile.view"))
 		// clinic.GET("/users", controllers.GetClinicUsersHandler, middlewares.RequireClinicPermission("staff.view"))

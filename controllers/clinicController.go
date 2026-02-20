@@ -362,3 +362,126 @@ func GetTreatmentByClinicHandler(c echo.Context) error {
 
 	return c.JSON(http.StatusOK, resp)
 }
+
+// ClinicForgotPasswordHandler handles POST /clinic/forgot-password
+func ClinicForgotPasswordHandler(c echo.Context) error {
+	var req struct {
+		Email string `json:"email"`
+	}
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, resdto.BaseResponse{
+			IsSuccess: false,
+			Message:   "invalid payload",
+		})
+	}
+
+	if req.Email == "" {
+		return c.JSON(http.StatusBadRequest, resdto.BaseResponse{
+			IsSuccess: false,
+			Message:   "email is required",
+		})
+	}
+
+	if err := services.ClinicForgotPassword(req.Email); err != nil {
+		return c.JSON(http.StatusTooManyRequests, resdto.BaseResponse{
+			IsSuccess: false,
+			Message:   err.Error(),
+		})
+	}
+
+	// Always return success (don't reveal if email exists)
+	return c.JSON(http.StatusOK, resdto.BaseResponse{
+		IsSuccess: true,
+		Message:   "if this email is registered, a password reset OTP has been sent",
+	})
+}
+
+// ClinicResetPasswordHandler handles POST /clinic/reset-password
+func ClinicResetPasswordHandler(c echo.Context) error {
+	var req struct {
+		Email       string `json:"email"`
+		OTP         string `json:"otp"`
+		NewPassword string `json:"new_password"`
+	}
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, resdto.BaseResponse{
+			IsSuccess: false,
+			Message:   "invalid payload",
+		})
+	}
+
+	if req.Email == "" || req.OTP == "" || req.NewPassword == "" {
+		return c.JSON(http.StatusBadRequest, resdto.BaseResponse{
+			IsSuccess: false,
+			Message:   "email, otp, and new_password are required",
+		})
+	}
+
+	if len(req.NewPassword) < 6 {
+		return c.JSON(http.StatusBadRequest, resdto.BaseResponse{
+			IsSuccess: false,
+			Message:   "password must be at least 6 characters",
+		})
+	}
+
+	if err := services.ClinicResetPassword(req.Email, req.OTP, req.NewPassword); err != nil {
+		return c.JSON(http.StatusBadRequest, resdto.BaseResponse{
+			IsSuccess: false,
+			Message:   err.Error(),
+		})
+	}
+
+	return c.JSON(http.StatusOK, resdto.BaseResponse{
+		IsSuccess: true,
+		Message:   "password reset successfully",
+	})
+}
+
+// ClinicChangePasswordHandler handles POST /clinic/change-password (requires auth)
+func ClinicChangePasswordHandler(c echo.Context) error {
+	var req struct {
+		OldPassword string `json:"old_password"`
+		NewPassword string `json:"new_password"`
+	}
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, resdto.BaseResponse{
+			IsSuccess: false,
+			Message:   "invalid payload",
+		})
+	}
+
+	if req.OldPassword == "" || req.NewPassword == "" {
+		return c.JSON(http.StatusBadRequest, resdto.BaseResponse{
+			IsSuccess: false,
+			Message:   "old_password and new_password are required",
+		})
+	}
+
+	if len(req.NewPassword) < 6 {
+		return c.JSON(http.StatusBadRequest, resdto.BaseResponse{
+			IsSuccess: false,
+			Message:   "new password must be at least 6 characters",
+		})
+	}
+
+	clinicUserIDf, ok := c.Get("clinic_user_id").(float64)
+	if !ok {
+		return c.JSON(http.StatusUnauthorized, resdto.BaseResponse{
+			IsSuccess: false,
+			Message:   "clinic_user_id not found in context",
+		})
+	}
+	clinicUserID := uint64(clinicUserIDf)
+
+	if err := services.ClinicChangePassword(clinicUserID, req.OldPassword, req.NewPassword); err != nil {
+		return c.JSON(http.StatusBadRequest, resdto.BaseResponse{
+			IsSuccess: false,
+			Message:   err.Error(),
+		})
+	}
+
+	return c.JSON(http.StatusOK, resdto.BaseResponse{
+		IsSuccess: true,
+		Message:   "password changed successfully",
+	})
+}

@@ -954,3 +954,148 @@ func GetClinicRoles() ([]models.ClinicRole, error) {
 	}
 	return roles, nil
 }
+
+// ==================== CLINIC PASSWORD MANAGEMENT ====================
+
+// ClinicForgotPassword generates an OTP and sends it to the clinic user's email
+func ClinicForgotPassword(email string) error {
+	db := config.DB
+
+	// Check if any clinic user with this email exists
+	var clinicUser models.ClinicUser
+	if err := db.Where("email = ? AND status = ?", email, "active").First(&clinicUser).Error; err != nil {
+		// Don't reveal whether email exists or not
+		return nil
+	}
+
+	// Reuse existing OTP system with a prefix to separate from login OTPs
+	otpKey := "clinic_reset:" + email
+
+	// Check rate limiting
+	otpMutex.Lock()
+	existingOTP, exists := otpStore[otpKey]
+	if exists && time.Since(existingOTP.LastSentAt) < getResendCooldown() {
+		otpMutex.Unlock()
+		return errors.New("please wait before requesting a new OTP")
+	}
+	otpMutex.Unlock()
+
+	// Generate OTP
+	otpCode, err := GenerateOTP()
+	if err != nil {
+		return errors.New("failed to generate OTP")
+	}
+
+	// Store OTP with 15 minute expiry
+	otpMutex.Lock()
+	otpStore[otpKey] = OTPData{
+		Code:       otpCode,
+		ExpiresAt:  time.Now().Add(15 * time.Minute),
+		LastSentAt: time.Now(),
+		Attempts:   0,
+	}
+	otpMutex.Unlock()
+
+	// Send email
+	if err := utils.SendPasswordResetEmail(email, otpCode); err != nil {
+		otpMutex.Lock()
+		delete(otpStore, otpKey)
+		otpMutex.Unlock()
+		return errors.New("failed to send reset email")
+	}
+
+	return nil
+}
+
+// ClinicResetPassword verifies OTP and sets a new password
+func ClinicResetPassword(email, otp, newPassword string) error {
+	db := config.DB
+
+	otpKey := "clinic_reset:" + email
+
+	// Get OTP from store
+	otpMutex.Lock()
+	otpData, exists := otpStore[otpKey]
+	otpMutex.Unlock()
+
+	if !exists {
+		return errors.New("OTP not found, please request a new one")
+	}
+
+	// Check expiry
+	if time.Now().After(otpData.ExpiresAt) {
+		otpMutex.Lock()
+		delete(otpStore, otpKey)
+		otpMutex.Unlock()
+		return errors.New("OTP expired, please request a new one")
+	}
+
+	// Check max attempts
+	if otpData.Attempts >= getMaxOTPAttempts() {
+		otpMutex.Lock()
+		delete(otpStore, otpKey)
+		otpMutex.Unlock()
+		return errors.New("too many failed attempts, please request a new OTP")
+	}
+
+	// Verify OTP
+	if otpData.Code != otp {
+		otpMutex.Lock()
+		otpData.Attempts++
+		otpStore[otpKey] = otpData
+		otpMutex.Unlock()
+		remaining := getMaxOTPAttempts() - otpData.Attempts
+		return fmt.Errorf("invalid OTP, %d attempts remaining", remaining)
+	}
+
+	// OTP verified — delete it
+	otpMutex.Lock()
+	delete(otpStore, otpKey)
+	otpMutex.Unlock()
+
+	// Hash new password
+	hashedPassword, err := HashPassword(newPassword)
+	if err != nil {
+		return errors.New("failed to hash password")
+	}
+
+	// Update password for ALL clinic user records with this email
+	if err := db.Model(&models.ClinicUser{}).
+		Where("email = ?", email).
+		Update("password_hash", hashedPassword).Error; err != nil {
+		return errors.New("failed to update password")
+	}
+
+	return nil
+}
+
+// ClinicChangePassword verifies old password and sets a new one (authenticated)
+func ClinicChangePassword(clinicUserID uint64, oldPassword, newPassword string) error {
+	db := config.DB
+
+	// Get the clinic user
+	var clinicUser models.ClinicUser
+	if err := db.First(&clinicUser, clinicUserID).Error; err != nil {
+		return errors.New("user not found")
+	}
+
+	// Verify old password
+	if !CheckPasswordHash(oldPassword, clinicUser.PasswordHash) {
+		return errors.New("incorrect old password")
+	}
+
+	// Hash new password
+	hashedPassword, err := HashPassword(newPassword)
+	if err != nil {
+		return errors.New("failed to hash password")
+	}
+
+	// Update password for ALL records with this email (multi-clinic support)
+	if err := db.Model(&models.ClinicUser{}).
+		Where("email = ?", clinicUser.Email).
+		Update("password_hash", hashedPassword).Error; err != nil {
+		return errors.New("failed to update password")
+	}
+
+	return nil
+}
