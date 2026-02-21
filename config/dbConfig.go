@@ -93,6 +93,7 @@ func ConnectDB() {
 		&models.ClinicUserTreatment{},
 		&models.ClinicSideArea{},
 		&models.ClinicUserSideArea{},
+		&models.ClinicUserProfile{},
 	); err != nil {
 		// attempt to close DB on migration error
 		if cerr := CloseDB(); cerr != nil {

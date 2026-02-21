@@ -170,3 +170,23 @@ type ClinicUserSideArea struct {
 func (ClinicUserSideArea) TableName() string {
 	return "clinic_user_side_areas"
 }
+
+// ClinicUserProfile stores additional details for doctors/injectors at a clinic
+type ClinicUserProfile struct {
+	ID             uint64    `gorm:"primaryKey;autoIncrement" json:"id"`
+	ClinicUserID   uint64    `gorm:"not null;uniqueIndex:idx_profile_clinic_user" json:"clinic_user_id"`
+	ClinicID       uint64    `gorm:"not null;uniqueIndex:idx_profile_clinic_user" json:"clinic_id"`
+	Image          string    `gorm:"size:500" json:"image,omitempty"`
+	Specialization string    `gorm:"size:255" json:"specialization,omitempty"`
+	Phone          string    `gorm:"size:50" json:"phone,omitempty"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
+
+	// Relationships
+	ClinicUser ClinicUser `gorm:"foreignKey:ClinicUserID;constraint:OnDelete:CASCADE" json:"-"`
+	Clinic     Clinic     `gorm:"foreignKey:ClinicID;constraint:OnDelete:CASCADE" json:"-"`
+}
+
+func (ClinicUserProfile) TableName() string {
+	return "clinic_user_profiles"
+}

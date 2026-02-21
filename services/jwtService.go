@@ -3,11 +3,51 @@ package services
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"sync"
 	"time"
 
 	"github.com/dgrijalva/jwt-go"
 	"golang.org/x/crypto/bcrypt"
 )
+
+// ==================== TOKEN BLACKLIST ====================
+
+// In-memory blacklist for logged-out tokens
+var (
+	tokenBlacklist = make(map[string]time.Time) // token -> expiry time
+	blacklistMutex sync.Mutex
+)
+
+// BlacklistToken adds a token to the blacklist until it expires
+func BlacklistToken(token string, expiresAt time.Time) {
+	blacklistMutex.Lock()
+	tokenBlacklist[token] = expiresAt
+	blacklistMutex.Unlock()
+}
+
+// IsTokenBlacklisted checks if a token has been logged out
+func IsTokenBlacklisted(token string) bool {
+	blacklistMutex.Lock()
+	defer blacklistMutex.Unlock()
+	_, exists := tokenBlacklist[token]
+	return exists
+}
+
+// StartTokenBlacklistCleanup runs a background goroutine to clean expired tokens
+func StartTokenBlacklistCleanup() {
+	go func() {
+		for {
+			time.Sleep(5 * time.Minute)
+			blacklistMutex.Lock()
+			for token, expiresAt := range tokenBlacklist {
+				if time.Now().After(expiresAt) {
+					delete(tokenBlacklist, token)
+				}
+			}
+			blacklistMutex.Unlock()
+		}
+	}()
+}
 
 // TODO: Refresh token. Reseacrh how it works and then implement.
 var jwtSecret = []byte("skinSync")

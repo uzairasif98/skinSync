@@ -107,8 +107,17 @@ func SetupRoutes(e *echo.Group) {
 		// Staff management (owner only)
 		clinic.POST("/users/register", controllers.RegisterClinicUserHandler, middlewares.RequireClinicPermission("staff.create"))
 
-		// Doctor/Injector registration with treatment side areas (owner only)
+		// Doctor/Injector registration (owner only) - treatments optional
 		clinic.POST("/doctors/register", controllers.RegisterDoctorHandler, middlewares.RequireClinicPermission("staff.create"))
+
+		// Assign treatments to existing doctor/injector
+		clinic.POST("/doctors/treatments", controllers.AssignDoctorTreatmentsHandler, middlewares.RequireClinicPermission("staff.edit"))
+
+		// List all doctors/injectors for this clinic
+		clinic.GET("/doctors", controllers.GetDoctorsHandler, middlewares.RequireClinicPermission("staff.view"))
+
+		// Get full doctor detail by ID
+		clinic.GET("/doctors/:id", controllers.GetDoctorDetailHandler, middlewares.RequireClinicPermission("staff.view"))
 
 		// Clinic-managed areas and prices
 		// Frontend posts side_area_id (we resolve area/treatment) and optional syringe_size for per-size prices
@@ -132,6 +141,9 @@ func SetupRoutes(e *echo.Group) {
 
 		// Change password (requires auth)
 		clinic.POST("/change-password", controllers.ClinicChangePasswordHandler)
+
+		// Logout (requires auth)
+		clinic.POST("/logout", controllers.ClinicLogoutHandler)
 
 		// TODO: Add more clinic endpoints
 		// clinic.GET("/profile/me", controllers.GetClinicUserProfileHandler, middlewares.RequireClinicPermission("profile.view"))

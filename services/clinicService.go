@@ -426,40 +426,46 @@ func RegisterDoctorWithTreatments(req reqdto.RegisterDoctorRequest, clinicID uin
 		return nil, errors.New("failed to create clinic user")
 	}
 
-	// Process treatments and side areas
-	var sideAreaRecords []models.ClinicUserSideArea
-
-	for _, treatment := range req.Treatments {
-		// For each side area ID in the treatment
-		for _, sideAreaID := range treatment.TreatmentsSubSecID {
-			// Lookup side area to get area_id and treatment_id
-			var sideArea models.SideArea
-			if err := tx.First(&sideArea, sideAreaID).Error; err != nil {
-				tx.Rollback()
-				return nil, fmt.Errorf("side_area id %d not found", sideAreaID)
-			}
-
-			// Verify the side area belongs to the specified treatment
-			if sideArea.TreatmentID != treatment.TreatmentID {
-				tx.Rollback()
-				return nil, fmt.Errorf("side_area %d does not belong to treatment %d", sideAreaID, treatment.TreatmentID)
-			}
-
-			// Create ClinicUserSideArea record
-			sideAreaRecord := models.ClinicUserSideArea{
-				ClinicUserID: clinicUser.ID,
-				ClinicID:     clinicID,
-				TreatmentID:  sideArea.TreatmentID,
-				AreaID:       sideArea.AreaID,
-				SideAreaID:   sideArea.ID,
-			}
-
-			sideAreaRecords = append(sideAreaRecords, sideAreaRecord)
-		}
+	// Save profile details (image, specialization, phone)
+	profile := models.ClinicUserProfile{
+		ClinicUserID:   clinicUser.ID,
+		ClinicID:       clinicID,
+		Image:          req.Image,
+		Specialization: req.Specialization,
+		Phone:          req.ContactInfo.Phone,
+	}
+	if err := tx.Create(&profile).Error; err != nil {
+		tx.Rollback()
+		return nil, errors.New("failed to save doctor profile")
 	}
 
-	// Batch insert side area records
-	if len(sideAreaRecords) > 0 {
+	// Process treatments and side areas (optional)
+	if len(req.Treatments) > 0 {
+		var sideAreaRecords []models.ClinicUserSideArea
+
+		for _, treatment := range req.Treatments {
+			for _, sideAreaID := range treatment.TreatmentsSubSecID {
+				var sideArea models.SideArea
+				if err := tx.First(&sideArea, sideAreaID).Error; err != nil {
+					tx.Rollback()
+					return nil, fmt.Errorf("side_area id %d not found", sideAreaID)
+				}
+
+				if sideArea.TreatmentID != treatment.TreatmentID {
+					tx.Rollback()
+					return nil, fmt.Errorf("side_area %d does not belong to treatment %d", sideAreaID, treatment.TreatmentID)
+				}
+
+				sideAreaRecords = append(sideAreaRecords, models.ClinicUserSideArea{
+					ClinicUserID: clinicUser.ID,
+					ClinicID:     clinicID,
+					TreatmentID:  sideArea.TreatmentID,
+					AreaID:       sideArea.AreaID,
+					SideAreaID:   sideArea.ID,
+				})
+			}
+		}
+
 		if err := tx.Create(&sideAreaRecords).Error; err != nil {
 			tx.Rollback()
 			return nil, errors.New("failed to assign side areas to user")
@@ -477,7 +483,6 @@ func RegisterDoctorWithTreatments(req reqdto.RegisterDoctorRequest, clinicID uin
 
 	message := "Doctor registered successfully."
 	if plainPassword != "" {
-		// New user - send email with credentials
 		emailErr := utils.SendClinicCredentialsEmail(
 			clinicUser.Email,
 			clinicUser.Name,
@@ -507,6 +512,55 @@ func RegisterDoctorWithTreatments(req reqdto.RegisterDoctorRequest, clinicID uin
 			Status:   clinicUser.Status,
 		},
 	}, nil
+}
+
+// AssignDoctorTreatments assigns treatments and side areas to an existing doctor/injector
+func AssignDoctorTreatments(req reqdto.AssignDoctorTreatmentsRequest, clinicID uint64) error {
+	db := config.DB
+
+	// Verify the clinic user exists at this clinic
+	var clinicUser models.ClinicUser
+	if err := db.Where("id = ? AND clinic_id = ?", req.ClinicUserID, clinicID).First(&clinicUser).Error; err != nil {
+		return errors.New("doctor not found at this clinic")
+	}
+
+	var sideAreaRecords []models.ClinicUserSideArea
+
+	for _, treatment := range req.Treatments {
+		for _, sideAreaID := range treatment.TreatmentsSubSecID {
+			var sideArea models.SideArea
+			if err := db.First(&sideArea, sideAreaID).Error; err != nil {
+				return fmt.Errorf("side_area id %d not found", sideAreaID)
+			}
+
+			if sideArea.TreatmentID != treatment.TreatmentID {
+				return fmt.Errorf("side_area %d does not belong to treatment %d", sideAreaID, treatment.TreatmentID)
+			}
+
+			// Check if already assigned
+			var existing models.ClinicUserSideArea
+			if err := db.Where("clinic_user_id = ? AND clinic_id = ? AND side_area_id = ?",
+				req.ClinicUserID, clinicID, sideArea.ID).First(&existing).Error; err == nil {
+				continue // already assigned, skip
+			}
+
+			sideAreaRecords = append(sideAreaRecords, models.ClinicUserSideArea{
+				ClinicUserID: req.ClinicUserID,
+				ClinicID:     clinicID,
+				TreatmentID:  sideArea.TreatmentID,
+				AreaID:       sideArea.AreaID,
+				SideAreaID:   sideArea.ID,
+			})
+		}
+	}
+
+	if len(sideAreaRecords) > 0 {
+		if err := db.Create(&sideAreaRecords).Error; err != nil {
+			return errors.New("failed to assign treatments")
+		}
+	}
+
+	return nil
 }
 
 // SideAreaPayload is the payload shape when frontend sends side_area_id
@@ -1067,6 +1121,179 @@ func ClinicResetPassword(email, otp, newPassword string) error {
 	}
 
 	return nil
+}
+
+// ==================== DOCTOR LISTING ====================
+
+// DoctorListItem represents a doctor in the list response
+type DoctorListItem struct {
+	ID             uint64 `json:"id"`
+	Name           string `json:"name"`
+	Email          string `json:"email"`
+	Role           string `json:"role"`
+	Status         string `json:"status"`
+	Image          string `json:"image,omitempty"`
+	Specialization string `json:"specialization,omitempty"`
+	Phone          string `json:"phone,omitempty"`
+}
+
+// DoctorTreatmentDetail represents a treatment assigned to a doctor
+type DoctorTreatmentDetail struct {
+	TreatmentID   uint   `json:"treatment_id"`
+	TreatmentName string `json:"treatment_name"`
+	SideAreas     []DoctorSideAreaDetail `json:"side_areas"`
+}
+
+// DoctorSideAreaDetail represents a side area assigned to a doctor
+type DoctorSideAreaDetail struct {
+	SideAreaID   uint   `json:"side_area_id"`
+	SideAreaName string `json:"side_area_name"`
+	AreaID       uint   `json:"area_id"`
+	AreaName     string `json:"area_name,omitempty"`
+}
+
+// DoctorFullDetail represents full doctor detail with profile and treatments
+type DoctorFullDetail struct {
+	ID             uint64                 `json:"id"`
+	ClinicID       uint64                 `json:"clinic_id"`
+	Name           string                 `json:"name"`
+	Email          string                 `json:"email"`
+	Role           string                 `json:"role"`
+	Status         string                 `json:"status"`
+	Image          string                 `json:"image,omitempty"`
+	Specialization string                 `json:"specialization,omitempty"`
+	Phone          string                 `json:"phone,omitempty"`
+	CreatedAt      time.Time              `json:"created_at"`
+	Treatments     []DoctorTreatmentDetail `json:"treatments"`
+}
+
+// GetDoctorsByClinic returns all doctors/injectors for a clinic with profile info
+func GetDoctorsByClinic(clinicID uint64) ([]DoctorListItem, error) {
+	db := config.DB
+
+	// Get doctor and injector role IDs
+	var roles []models.ClinicRole
+	if err := db.Where("name IN ?", []string{models.ClinicRoleDoctor, models.ClinicRoleInjector}).Find(&roles).Error; err != nil {
+		return nil, err
+	}
+	roleIDs := make([]uint64, 0, len(roles))
+	for _, r := range roles {
+		roleIDs = append(roleIDs, r.ID)
+	}
+
+	// Get clinic users with doctor/injector roles
+	var clinicUsers []models.ClinicUser
+	if err := db.Preload("Role").
+		Where("clinic_id = ? AND role_id IN ?", clinicID, roleIDs).
+		Find(&clinicUsers).Error; err != nil {
+		return nil, err
+	}
+
+	var doctors []DoctorListItem
+	for _, cu := range clinicUsers {
+		item := DoctorListItem{
+			ID:     cu.ID,
+			Name:   cu.Name,
+			Email:  cu.Email,
+			Role:   cu.Role.Name,
+			Status: cu.Status,
+		}
+
+		// Get profile details
+		var profile models.ClinicUserProfile
+		if err := db.Where("clinic_user_id = ? AND clinic_id = ?", cu.ID, clinicID).First(&profile).Error; err == nil {
+			item.Image = profile.Image
+			item.Specialization = profile.Specialization
+			item.Phone = profile.Phone
+		}
+
+		doctors = append(doctors, item)
+	}
+
+	return doctors, nil
+}
+
+// GetDoctorDetailByID returns full doctor detail with profile and assigned treatments
+func GetDoctorDetailByID(doctorID uint64, clinicID uint64) (*DoctorFullDetail, error) {
+	db := config.DB
+
+	// Get clinic user
+	var clinicUser models.ClinicUser
+	if err := db.Preload("Role").
+		Where("id = ? AND clinic_id = ?", doctorID, clinicID).
+		First(&clinicUser).Error; err != nil {
+		return nil, errors.New("doctor not found at this clinic")
+	}
+
+	detail := &DoctorFullDetail{
+		ID:        clinicUser.ID,
+		ClinicID:  clinicUser.ClinicID,
+		Name:      clinicUser.Name,
+		Email:     clinicUser.Email,
+		Role:      clinicUser.Role.Name,
+		Status:    clinicUser.Status,
+		CreatedAt: clinicUser.CreatedAt,
+	}
+
+	// Get profile
+	var profile models.ClinicUserProfile
+	if err := db.Where("clinic_user_id = ? AND clinic_id = ?", doctorID, clinicID).First(&profile).Error; err == nil {
+		detail.Image = profile.Image
+		detail.Specialization = profile.Specialization
+		detail.Phone = profile.Phone
+	}
+
+	// Get assigned side areas grouped by treatment
+	var sideAreaRecords []models.ClinicUserSideArea
+	if err := db.Where("clinic_user_id = ? AND clinic_id = ?", doctorID, clinicID).
+		Find(&sideAreaRecords).Error; err != nil {
+		return detail, nil
+	}
+
+	// Group by treatment
+	treatmentMap := make(map[uint]*DoctorTreatmentDetail)
+	for _, record := range sideAreaRecords {
+		if _, exists := treatmentMap[record.TreatmentID]; !exists {
+			// Get treatment name
+			var treatment models.Treatment
+			treatmentName := ""
+			if err := db.First(&treatment, record.TreatmentID).Error; err == nil {
+				treatmentName = treatment.Name
+			}
+			treatmentMap[record.TreatmentID] = &DoctorTreatmentDetail{
+				TreatmentID:   record.TreatmentID,
+				TreatmentName: treatmentName,
+				SideAreas:     []DoctorSideAreaDetail{},
+			}
+		}
+
+		// Get side area name
+		var sideArea models.SideArea
+		sideAreaName := ""
+		if err := db.First(&sideArea, record.SideAreaID).Error; err == nil {
+			sideAreaName = sideArea.Name
+		}
+
+		// Get area name
+		var area models.Area
+		areaName := ""
+		if err := db.First(&area, record.AreaID).Error; err == nil {
+			areaName = area.Name
+		}
+
+		treatmentMap[record.TreatmentID].SideAreas = append(treatmentMap[record.TreatmentID].SideAreas, DoctorSideAreaDetail{
+			SideAreaID:   record.SideAreaID,
+			SideAreaName: sideAreaName,
+			AreaID:       record.AreaID,
+			AreaName:     areaName,
+		})
+	}
+
+	for _, t := range treatmentMap {
+		detail.Treatments = append(detail.Treatments, *t)
+	}
+
+	return detail, nil
 }
 
 // ClinicChangePassword verifies old password and sets a new one (authenticated)

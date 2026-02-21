@@ -4,11 +4,13 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	reqdto "skinSync/dto/request"
 	resdto "skinSync/dto/response"
 	"skinSync/services"
 
+	"github.com/dgrijalva/jwt-go"
 	"github.com/labstack/echo/v4"
 )
 
@@ -127,10 +129,10 @@ func RegisterDoctorHandler(c echo.Context) error {
 	}
 
 	// Validate required fields
-	if req.Role == "" || req.Name == "" || req.ContactInfo.Email == "" || len(req.Treatments) == 0 {
+	if req.Role == "" || req.Name == "" || req.ContactInfo.Email == "" {
 		return c.JSON(http.StatusBadRequest, resdto.BaseResponse{
 			IsSuccess: false,
-			Message:   "role, name, contact_info.email, and treatments are required",
+			Message:   "role, name, and contact_info.email are required",
 		})
 	}
 
@@ -151,6 +153,105 @@ func RegisterDoctorHandler(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusCreated, resp)
+}
+
+// AssignDoctorTreatmentsHandler handles POST /clinic/doctors/treatments
+func AssignDoctorTreatmentsHandler(c echo.Context) error {
+	clinicIDf, ok := c.Get("clinic_id").(float64)
+	if !ok {
+		return c.JSON(http.StatusUnauthorized, resdto.BaseResponse{
+			IsSuccess: false,
+			Message:   "clinic_id not found in context",
+		})
+	}
+	clinicID := uint64(clinicIDf)
+
+	var req reqdto.AssignDoctorTreatmentsRequest
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, resdto.BaseResponse{
+			IsSuccess: false,
+			Message:   "invalid payload: " + err.Error(),
+		})
+	}
+
+	if req.ClinicUserID == 0 || len(req.Treatments) == 0 {
+		return c.JSON(http.StatusBadRequest, resdto.BaseResponse{
+			IsSuccess: false,
+			Message:   "clinic_user_id and treatments are required",
+		})
+	}
+
+	if err := services.AssignDoctorTreatments(req, clinicID); err != nil {
+		return c.JSON(http.StatusBadRequest, resdto.BaseResponse{
+			IsSuccess: false,
+			Message:   err.Error(),
+		})
+	}
+
+	return c.JSON(http.StatusOK, resdto.BaseResponse{
+		IsSuccess: true,
+		Message:   "treatments assigned successfully",
+	})
+}
+
+// GetDoctorsHandler handles GET /clinic/doctors
+func GetDoctorsHandler(c echo.Context) error {
+	clinicIDf, ok := c.Get("clinic_id").(float64)
+	if !ok {
+		return c.JSON(http.StatusUnauthorized, resdto.BaseResponse{
+			IsSuccess: false,
+			Message:   "clinic_id not found in context",
+		})
+	}
+	clinicID := uint64(clinicIDf)
+
+	doctors, err := services.GetDoctorsByClinic(clinicID)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, resdto.BaseResponse{
+			IsSuccess: false,
+			Message:   "failed to fetch doctors: " + err.Error(),
+		})
+	}
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"is_success": true,
+		"message":    "doctors retrieved successfully",
+		"data":       doctors,
+	})
+}
+
+// GetDoctorDetailHandler handles GET /clinic/doctors/:id
+func GetDoctorDetailHandler(c echo.Context) error {
+	clinicIDf, ok := c.Get("clinic_id").(float64)
+	if !ok {
+		return c.JSON(http.StatusUnauthorized, resdto.BaseResponse{
+			IsSuccess: false,
+			Message:   "clinic_id not found in context",
+		})
+	}
+	clinicID := uint64(clinicIDf)
+
+	doctorID, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, resdto.BaseResponse{
+			IsSuccess: false,
+			Message:   "invalid doctor id",
+		})
+	}
+
+	detail, err := services.GetDoctorDetailByID(doctorID, clinicID)
+	if err != nil {
+		return c.JSON(http.StatusNotFound, resdto.BaseResponse{
+			IsSuccess: false,
+			Message:   err.Error(),
+		})
+	}
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"is_success": true,
+		"message":    "doctor detail retrieved successfully",
+		"data":       detail,
+	})
 }
 
 // CreateClinicSideAreasFromSideAreaHandler handles POST /clinic/side-areas
@@ -483,5 +584,43 @@ func ClinicChangePasswordHandler(c echo.Context) error {
 	return c.JSON(http.StatusOK, resdto.BaseResponse{
 		IsSuccess: true,
 		Message:   "password changed successfully",
+	})
+}
+
+// ClinicLogoutHandler handles POST /clinic/logout
+func ClinicLogoutHandler(c echo.Context) error {
+	// Get the raw token from the Authorization header
+	authHeader := c.Request().Header.Get("Authorization")
+	parts := strings.Split(authHeader, " ")
+	if len(parts) != 2 {
+		return c.JSON(http.StatusBadRequest, resdto.BaseResponse{
+			IsSuccess: false,
+			Message:   "invalid authorization header",
+		})
+	}
+	tokenString := parts[1]
+
+	// Parse token to get expiry time
+	token, _ := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+		return []byte("skinSync"), nil
+	})
+
+	var expiresAt time.Time
+	if claims, ok := token.Claims.(jwt.MapClaims); ok {
+		if exp, ok := claims["exp"].(float64); ok {
+			expiresAt = time.Unix(int64(exp), 0)
+		} else {
+			expiresAt = time.Now().Add(24 * time.Hour)
+		}
+	} else {
+		expiresAt = time.Now().Add(24 * time.Hour)
+	}
+
+	// Add token to blacklist
+	services.BlacklistToken(tokenString, expiresAt)
+
+	return c.JSON(http.StatusOK, resdto.BaseResponse{
+		IsSuccess: true,
+		Message:   "logged out successfully",
 	})
 }

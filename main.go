@@ -13,8 +13,9 @@ import (
 func main() {
 	config.ConnectDB()
 
-	// Start OTP cleanup goroutine
+	// Start background cleanup goroutines
 	services.StartOTPCleanup()
+	services.StartTokenBlacklistCleanup()
 
 	e := echo.New()
 	e.Binder = &middlewares.CustomBinder{}

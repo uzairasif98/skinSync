@@ -6,6 +6,7 @@ import (
 
 	resdto "skinSync/dto/response"
 	"skinSync/permissions"
+	"skinSync/services"
 
 	"github.com/dgrijalva/jwt-go"
 	"github.com/labstack/echo/v4"
@@ -35,6 +36,14 @@ func ClinicAuthMiddleware(next echo.HandlerFunc) echo.HandlerFunc {
 		}
 
 		tokenString := parts[1]
+
+		// Check if token is blacklisted (logged out)
+		if services.IsTokenBlacklisted(tokenString) {
+			return c.JSON(http.StatusUnauthorized, resdto.BaseResponse{
+				IsSuccess: false,
+				Message:   "token has been logged out",
+			})
+		}
 
 		// Parse and validate token
 		token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
